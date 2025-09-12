@@ -1,0 +1,4 @@
+redis: REDIS_PORT=${REDIS_PORT:-6379} redis-server --port ${REDIS_PORT:-6379}
+api: REDIS_URL=redis://localhost:${REDIS_PORT:-6379}/0 uvicorn src.api:app --host 0.0.0.0 --port ${API_PORT:-8000} --reload
+worker: REDIS_URL=redis://localhost:${REDIS_PORT:-6379}/0 celery -A src.worker.celery_app worker --loglevel=INFO --pool=solo
+

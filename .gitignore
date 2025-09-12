@@ -1,0 +1,41 @@
+# keep ignoring tests (existing)
+tests
+
+# python bytecode / build
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.pytest_cache/
+
+# virtual envs and env files
+.venv/
+venv/
+.env
+
+# editors/ide
+.vscode/
+.idea/
+
+# runtime db and run artifacts
+src/db.sqlite
+src/runs/
+results/
+tmp/
+**/progress.jsonl
+**/report.json
+**/model.pt
+
+# profiler outputs
+**/nsys/
+**/ncu/
+*.qdrep
+*.nsys-rep
+*.ncu-rep
+*.stats.*.csv
+.stats.*
+
+# logs and os cruft
+*.log
+.DS_Store
+Thumbs.db
