@@ -1,19 +1,14 @@
 # Celery worker for alcnet
-import os
+import contextlib
 import json
+import os
 import threading
 import time
-import shutil
-from typing import Optional
 
 from celery import Celery
 
-from .main import AlcnetCfg
-from .db import (
-    init_db, get_session, update_status, append_epoch, complete_run, add_artifact, get_run_row
-)
+from .db import add_artifact, append_epoch, complete_run, get_session, init_db, update_status
 from .runner import run_from_req
-
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 celery_app = Celery("alcnet_service", broker=REDIS_URL, backend=REDIS_URL)
@@ -72,7 +67,7 @@ def run_train_task(self, run_id: str, req: dict):
                     if not os.path.exists(p):
                         time.sleep(0.3)
                         continue
-                    with open(p, "r") as f:
+                    with open(p) as f:
                         f.seek(pos)
                         for line in f:
                             line = line.strip()
@@ -82,7 +77,7 @@ def run_train_task(self, run_id: str, req: dict):
                                 e = json.loads(line)
                             except Exception:
                                 continue
-                            db_retry(lambda s: append_epoch(s, run_id, e))
+                            db_retry(lambda s, _e=e: append_epoch(s, run_id, _e))
                         pos = f.tell()
                 except Exception:
                     pass
@@ -99,16 +94,12 @@ def run_train_task(self, run_id: str, req: dict):
         # Register obvious artifacts if present
         report_path = os.path.join(save_dir, "report.json")
         if os.path.exists(report_path):
-            try:
+            with contextlib.suppress(Exception):
                 db_retry(lambda s: add_artifact(s, run_id, "report", report_path, bytes=os.path.getsize(report_path)))
-            except Exception:
-                pass
         model_path = os.path.join(save_dir, "model.pt")
         if os.path.exists(model_path):
-            try:
+            with contextlib.suppress(Exception):
                 db_retry(lambda s: add_artifact(s, run_id, "checkpoint", model_path, bytes=os.path.getsize(model_path)))
-            except Exception:
-                pass
 
         # Mark complete with result
         db_retry(lambda s: complete_run(s, run_id, result_json=result, best_val_acc=(result.get("best") or {}).get("val_acc")))

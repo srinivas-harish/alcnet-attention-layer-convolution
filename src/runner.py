@@ -1,12 +1,12 @@
 import argparse
 import json
 import os
-from typing import Any, Dict, Optional
+from typing import Any
 
-from .main import train_and_eval, AlcnetCfg, pick_device
+from .main import AlcnetCfg, pick_device, train_and_eval
 
 
-def run_from_req(req: Dict[str, Any], *, run_id: Optional[str] = None, save_dir: Optional[str] = None, progress_file: Optional[str] = None) -> Dict[str, Any]:
+def run_from_req(req: dict[str, Any], *, run_id: str | None = None, save_dir: str | None = None, progress_file: str | None = None) -> dict[str, Any]:
     # Device selection
     device = pick_device(req.get("device"))
 

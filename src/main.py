@@ -7,25 +7,28 @@ by FastAPI + Celery + Redis and extended with NVTX/Nsight profiling later. The c
 
 from __future__ import annotations
 
-import os
+import contextlib
 import json
+import logging
 import math
-import time
+import os
 import random
-from dataclasses import dataclass, asdict
-from typing import Any, Dict, List, Optional, Tuple
+import time
+from dataclasses import asdict, dataclass
+from typing import Any
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
-
-from transformers import AutoTokenizer, AutoModel, set_seed as hf_set_seed
 from datasets import load_dataset
 from sklearn.metrics import accuracy_score, f1_score
+from torch.utils.data import DataLoader, Dataset
 from tqdm.auto import tqdm
+from transformers import AutoModel, AutoTokenizer
+from transformers import set_seed as hf_set_seed
 
+logger = logging.getLogger(__name__)
 
 # ---------------- Repro, device, and NVTX helpers ----------------
 GLOBAL_SEED = 42
@@ -44,7 +47,7 @@ def set_all_seeds(seed: int = GLOBAL_SEED):
     torch.backends.cudnn.allow_tf32 = True
 
 
-def pick_device(force: Optional[str] = None) -> torch.device:
+def pick_device(force: str | None = None) -> torch.device:
     if force == "cpu":
         return torch.device("cpu")
     if force == "cuda":
@@ -52,7 +55,7 @@ def pick_device(force: Optional[str] = None) -> torch.device:
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def effective_num_workers(requested: Optional[int]) -> int:
+def effective_num_workers(requested: int | None) -> int:
     # If inside Celery, prefer workers=0 for safety (no fork issues)
     if os.environ.get("IN_CELERY", "0") == "1":
         return 0
@@ -66,17 +69,13 @@ class nvtx_range:
 
     def __enter__(self):
         if self.enabled:
-            try:
+            with contextlib.suppress(Exception):
                 torch.cuda.nvtx.range_push(self.name)
-            except Exception:
-                pass
 
     def __exit__(self, exc_type, exc, tb):
         if self.enabled:
-            try:
+            with contextlib.suppress(Exception):
                 torch.cuda.nvtx.range_pop()
-            except Exception:
-                pass
 
 
 # ---------------- Data ----------------
@@ -128,10 +127,8 @@ class EncoderWrapper(nn.Module):
             attn_implementation="eager",
         )
         if gradient_checkpointing and hasattr(self.encoder, "gradient_checkpointing_enable"):
-            try:
+            with contextlib.suppress(Exception):
                 self.encoder.gradient_checkpointing_enable()
-            except Exception:
-                pass
 
     def forward(self, **enc):
         out = self.encoder(**enc)
@@ -139,7 +136,7 @@ class EncoderWrapper(nn.Module):
         return out.attentions, cls
 
 
-_MASK_CACHE: Dict[Tuple[int, str], torch.Tensor] = {}
+_MASK_CACHE: dict[tuple[int, str], torch.Tensor] = {}
 
 
 def _mask_far(S: int, device, k: int = 5):
@@ -166,7 +163,7 @@ def _nan_to_num(x: torch.Tensor) -> torch.Tensor:
 
 
 @torch.no_grad()
-def attn_stats_21(att_list: List[torch.Tensor], layers: List[int], k: int = 5) -> torch.Tensor:
+def attn_stats_21(att_list: list[torch.Tensor], layers: list[int], k: int = 5) -> torch.Tensor:
     stats = []
 
     def layer_feats(A):
@@ -205,7 +202,7 @@ def attn_stats_21(att_list: List[torch.Tensor], layers: List[int], k: int = 5) -
     return _nan_to_num(out)
 
 
-def build_attn_tensor(attn_list: List[torch.Tensor], layer_idx: List[int], resize_to: int, channel_norm: bool = True) -> torch.Tensor:
+def build_attn_tensor(attn_list: list[torch.Tensor], layer_idx: list[int], resize_to: int, channel_norm: bool = True) -> torch.Tensor:
     x = torch.cat([attn_list[i] for i in layer_idx], dim=1)  # (B, C, S, S)
     x = torch.nan_to_num(x, nan=0.0, posinf=1e4, neginf=-1e4)
     if channel_norm:
@@ -307,21 +304,21 @@ class AlcnetCfg:
     weight_decay: float = 1e-4
     label_smoothing: float = 0.05
     grad_clip: float = 1.0
-    attn_layers: Tuple[int, int, int] = (-3, -2, -1)
+    attn_layers: tuple[int, int, int] = (-3, -2, -1)
     attn_size: int = 128
     seed: int = GLOBAL_SEED
-    device: Optional[str] = None  # "cpu" | "cuda" | None(auto)
+    device: str | None = None  # "cpu" | "cuda" | None(auto)
     # optional caps
-    max_train_samples: Optional[int] = None
-    max_val_samples: Optional[int] = None
-    max_train_batches: Optional[int] = None
-    max_val_batches: Optional[int] = None
+    max_train_samples: int | None = None
+    max_val_samples: int | None = None
+    max_train_batches: int | None = None
+    max_val_batches: int | None = None
     # toggles
     gradient_checkpointing: bool = True
 
 
-def parse_layers(sel: Tuple[int, ...], n_layers: int) -> List[int]:
-    out: List[int] = []
+def parse_layers(sel: tuple[int, ...], n_layers: int) -> list[int]:
+    out: list[int] = []
     for i in sel:
         j = i if i >= 0 else (n_layers + i)
         if 0 <= j < n_layers:
@@ -329,7 +326,7 @@ def parse_layers(sel: Tuple[int, ...], n_layers: int) -> List[int]:
     return sorted(set(out))
 
 
-def build_loaders(cfg: AlcnetCfg, device: torch.device, dataloader_workers: Optional[int] = None):
+def build_loaders(cfg: AlcnetCfg, device: torch.device, dataloader_workers: int | None = None):
     raw = load_dataset("glue", cfg.task_name)
     tok = AutoTokenizer.from_pretrained(cfg.model_name, use_fast=True)
 
@@ -368,7 +365,7 @@ def build_loaders(cfg: AlcnetCfg, device: torch.device, dataloader_workers: Opti
 
 
 @torch.no_grad()
-def evaluate(encoder, model, dl, device, layer_idx, attn_size, max_batches=None) -> Tuple[float, float]:
+def evaluate(encoder, model, dl, device, layer_idx, attn_size, max_batches=None) -> tuple[float, float]:
     encoder.eval()
     model.eval()
     preds, gts = [], []
@@ -396,18 +393,18 @@ def evaluate(encoder, model, dl, device, layer_idx, attn_size, max_batches=None)
 
 def train_and_eval(
     *,
-    task_ctx: Optional[Any] = None,   # Celery task (for update_state), or None
-    device: Optional[torch.device] = None,
-    cfg: Optional[AlcnetCfg] = None,
-    save_dir: Optional[str] = None,
+    task_ctx: Any | None = None,   # Celery task (for update_state), or None
+    device: torch.device | None = None,
+    cfg: AlcnetCfg | None = None,
+    save_dir: str | None = None,
     save_artifacts: bool = False,
-    progress_path: Optional[str] = None,
-) -> Dict[str, Any]:
+    progress_path: str | None = None,
+) -> dict[str, Any]:
     cfg = cfg or AlcnetCfg()
     set_all_seeds(cfg.seed)
     device = device or pick_device(cfg.device)
 
-    tok, train_dl, val_dl = build_loaders(cfg, device)
+    _tok, train_dl, val_dl = build_loaders(cfg, device)
     encoder = EncoderWrapper(cfg.model_name, cfg.gradient_checkpointing).to(device)
 
     # Probe shapes for model init
@@ -441,7 +438,7 @@ def train_and_eval(
     if save_dir:
         os.makedirs(save_dir, exist_ok=True)
 
-    logs: List[Dict[str, Any]] = []
+    logs: list[dict[str, Any]] = []
     best = {"val_acc": -1.0, "epoch": -1, "val_f1": None}
     step = 0
 
@@ -459,8 +456,7 @@ def train_and_eval(
                 X = build_attn_tensor(att_list, layer_idx, cfg.attn_size, True).to(device, non_blocking=True)
                 S = attn_stats_21(att_list, layer_idx).to(device, non_blocking=True)
 
-                with nvtx_range("forward", enabled=(device.type == "cuda")):
-                    with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=(device.type == "cuda")):
+                with nvtx_range("forward", enabled=(device.type == "cuda")), torch.autocast(device_type="cuda", dtype=torch.float16, enabled=(device.type == "cuda")):
                         logits = model(X, cls_vec, S)
                         loss = ce_loss(logits, y)
 
@@ -500,21 +496,16 @@ def train_and_eval(
         }
         logs.append(ep_row)
         if progress_path:
-            try:
-                with open(progress_path, "a") as pf:
-                    pf.write(json.dumps(ep_row) + "\n")
-            except Exception:
-                pass
+            with contextlib.suppress(Exception), open(progress_path, "a") as pf:
+                pf.write(json.dumps(ep_row) + "\n")
         if task_ctx is not None:
-            try:
+            with contextlib.suppress(Exception):
                 task_ctx.update_state(state="STARTED", meta={"progress_epoch": ep, "epochs_total": cfg.epochs, "last_val": {"acc": val_acc, "f1": val_f1}})
-            except Exception:
-                pass
 
         if val_acc > best["val_acc"]:
             best = {"val_acc": float(val_acc), "epoch": ep, "val_f1": float(val_f1)}
             if save_dir and save_artifacts:
-                try:
+                with contextlib.suppress(Exception):
                     torch.save(
                         {
                             "encoder": encoder.state_dict(),
@@ -528,8 +519,6 @@ def train_and_eval(
                         },
                         os.path.join(save_dir, "model.pt"),
                     )
-                except Exception:
-                    pass
 
     return {
         "seed": cfg.seed,
@@ -543,8 +532,8 @@ def train_and_eval(
 
 __all__ = [
     "AlcnetCfg",
-    "train_and_eval",
     "pick_device",
     "set_all_seeds",
+    "train_and_eval",
 ]
 

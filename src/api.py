@@ -1,15 +1,21 @@
-from typing import Any, Dict, Optional, List
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from .db import (
-    init_db, get_session, create_run, set_task_id,
-    list_runs as db_list_runs, get_run_row, serialize_run,
+    create_run,
+    get_run_row,
+    get_session,
+    init_db,
+    serialize_run,
+    set_task_id,
+)
+from .db import (
+    list_runs as db_list_runs,
 )
 from .worker import run_train_task
-
 
 app = FastAPI(title="alcnet Service", version="0.1.0")
 
@@ -32,15 +38,15 @@ init_db()
 
 
 class RunRequest(BaseModel):
-    ablation: Optional[str] = None
-    overrides: Dict[str, Any] = Field(default_factory=dict)
+    ablation: str | None = None
+    overrides: dict[str, Any] = Field(default_factory=dict)
     epochs: int = 3
     batch_size: int = 8
     max_len: int = 128
-    save_dir: Optional[str] = None
+    save_dir: str | None = None
     save_artifacts: bool = False
     gradient_checkpointing: bool = True
-    device: Optional[str] = None
+    device: str | None = None
 
 
 @app.get("/")
@@ -75,7 +81,7 @@ def submit_run(req: RunRequest):
 
 
 @app.get("/runs")
-def list_runs(limit: int = Query(50, ge=1, le=500), status: Optional[str] = None):
+def list_runs(limit: int = Query(50, ge=1, le=500), status: str | None = None):
     with get_session() as s:
         rows = db_list_runs(s, limit=limit, status=status)
         return [serialize_run(r, with_children=False) for r in rows]

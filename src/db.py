@@ -1,12 +1,11 @@
 import os
 import uuid
-from datetime import datetime
+from collections.abc import Iterable
 from contextlib import contextmanager
-from typing import Any, Dict, Iterable, Optional
+from datetime import datetime
+from typing import Any
 
-from sqlalchemy import (
-    create_engine, Column, String, Integer, Float, DateTime, Text, JSON, Boolean, ForeignKey
-)
+from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, create_engine
 from sqlalchemy.orm import DeclarativeBase, relationship, sessionmaker
 
 
@@ -111,15 +110,15 @@ def get_session():
 def create_run(
     s,
     *,
-    ablation: Optional[str],
-    overrides: Optional[Dict[str, Any]],
+    ablation: str | None,
+    overrides: dict[str, Any] | None,
     epochs: int,
     batch_size: int,
     max_len: int,
-    device: Optional[str],
-    save_dir: Optional[str],
+    device: str | None,
+    save_dir: str | None,
     save_artifacts: bool,
-    early_stop: Optional[Dict[str, Any]],
+    early_stop: dict[str, Any] | None,
 ) -> Run:
     run = Run(
         ablation=ablation,
@@ -145,7 +144,7 @@ def set_task_id(s, run_id: str, task_id: str) -> None:
         r.status = "QUEUED"
 
 
-def update_status(s, run_id: str, status: str, error: Optional[str] = None) -> None:
+def update_status(s, run_id: str, status: str, error: str | None = None) -> None:
     r = s.get(Run, run_id)
     if r:
         r.status = status
@@ -153,7 +152,7 @@ def update_status(s, run_id: str, status: str, error: Optional[str] = None) -> N
             r.error = error
 
 
-def append_epoch(s, run_id: str, e: Dict[str, Any]) -> None:
+def append_epoch(s, run_id: str, e: dict[str, Any]) -> None:
     row = EpochMetric(
         run_id=run_id,
         epoch=int(e.get("epoch")),
@@ -168,7 +167,7 @@ def append_epoch(s, run_id: str, e: Dict[str, Any]) -> None:
     s.add(row)
 
 
-def complete_run(s, run_id: str, *, result_json: Dict[str, Any], best_val_acc: Optional[float]) -> None:
+def complete_run(s, run_id: str, *, result_json: dict[str, Any], best_val_acc: float | None) -> None:
     r = s.get(Run, run_id)
     if r:
         r.status = "COMPLETE"
@@ -176,22 +175,22 @@ def complete_run(s, run_id: str, *, result_json: Dict[str, Any], best_val_acc: O
         r.best_val_acc = best_val_acc
 
 
-def add_artifact(s, run_id: str, kind: str, path: str, bytes: Optional[int] = None) -> None:
+def add_artifact(s, run_id: str, kind: str, path: str, bytes: int | None = None) -> None:
     s.add(Artifact(run_id=run_id, kind=kind, path=path, bytes=bytes))
 
 
-def list_runs(s, limit: int = 50, status: Optional[str] = None) -> Iterable[Run]:
+def list_runs(s, limit: int = 50, status: str | None = None) -> Iterable[Run]:
     q = s.query(Run).order_by(Run.created_at.desc())
     if status:
         q = q.filter(Run.status == status)
     return q.limit(limit).all()
 
 
-def get_run_row(s, run_id: str) -> Optional[Run]:
+def get_run_row(s, run_id: str) -> Run | None:
     return s.get(Run, run_id)
 
 
-def serialize_run(run: Run, with_children: bool = False) -> Dict[str, Any]:
+def serialize_run(run: Run, with_children: bool = False) -> dict[str, Any]:
     d = {
         "run_id": run.id,
         "task_id": run.task_id,
