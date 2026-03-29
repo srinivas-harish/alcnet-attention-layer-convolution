@@ -35,6 +35,9 @@ tmp/
 *.stats.*.csv
 .stats.*
 
+# redis dumps
+dump.rdb
+
 # logs and os cruft
 *.log
 .DS_Store
