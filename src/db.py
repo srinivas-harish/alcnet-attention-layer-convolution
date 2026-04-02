@@ -2,7 +2,7 @@ import os
 import uuid
 from collections.abc import Iterable
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, create_engine
@@ -51,8 +51,8 @@ class Run(Base):
     result_json = Column(JSON, nullable=True)
     error = Column(Text, nullable=True)
 
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC), index=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
     epochs_rel = relationship("EpochMetric", back_populates="run", cascade="all, delete-orphan")
     artifacts = relationship("Artifact", back_populates="run", cascade="all, delete-orphan")
@@ -72,7 +72,7 @@ class EpochMetric(Base):
     lr = Column(Float)
     gates_json = Column(JSON)
 
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
 
     run = relationship("Run", back_populates="epochs_rel")
 
@@ -84,7 +84,7 @@ class Artifact(Base):
     kind = Column(String)   # e.g., 'report', 'checkpoint', 'nsys', 'ncu', 'csv'
     path = Column(String)
     bytes = Column(Integer, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
 
     run = relationship("Run", back_populates="artifacts")
 
@@ -99,7 +99,7 @@ def get_session():
     try:
         yield s
         s.commit()
-    except:
+    except Exception:
         s.rollback()
         raise
     finally:
