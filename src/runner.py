@@ -1,9 +1,16 @@
 import argparse
 import json
+import logging
 import os
+from dataclasses import fields as dataclass_fields
 from typing import Any
 
 from .main import AlcnetCfg, pick_device, train_and_eval
+
+logger = logging.getLogger(__name__)
+
+# Whitelist of config fields that can be set via API overrides
+_ALLOWED_OVERRIDE_KEYS = frozenset(f.name for f in dataclass_fields(AlcnetCfg))
 
 
 def run_from_req(req: dict[str, Any], *, run_id: str | None = None, save_dir: str | None = None, progress_file: str | None = None) -> dict[str, Any]:
@@ -23,11 +30,13 @@ def run_from_req(req: dict[str, Any], *, run_id: str | None = None, save_dir: st
     if "gradient_checkpointing" in req:
         cfg.gradient_checkpointing = bool(req["gradient_checkpointing"])
 
-    # Apply overrides into cfg if keys match
+    # Apply overrides into cfg — only allow known AlcnetCfg fields
     overrides = req.get("overrides") or {}
     for k, v in overrides.items():
-        if hasattr(cfg, k):
+        if k in _ALLOWED_OVERRIDE_KEYS:
             setattr(cfg, k, v)
+        else:
+            logger.warning("Ignoring unknown override key: %s", k)
 
     # Decide save_dir
     eff_save_dir = save_dir or req.get("save_dir")
