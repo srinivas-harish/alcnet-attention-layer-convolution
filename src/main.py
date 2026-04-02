@@ -215,6 +215,44 @@ def build_attn_tensor(attn_list: list[torch.Tensor], layer_idx: list[int], resiz
     return x
 
 
+# ---------------- FiLM Conditioning Layer ----------------
+class FiLMGenerator(nn.Module):
+    """Generate FiLM (gamma, beta) parameters from a conditioning vector.
+
+    Given a conditioning input of shape (B, cond_dim), produces
+    gamma and beta of shape (B, n_channels) for feature-wise affine
+    transformation: out = gamma * features + beta.
+
+    Reference: Perez et al., "FiLM: Visual Reasoning with a General
+    Conditioning Layer", AAAI 2018.
+    """
+
+    def __init__(self, cond_dim: int, n_channels: int):
+        super().__init__()
+        self.proj = nn.Linear(cond_dim, n_channels * 2)
+        # Initialize gamma near 1 and beta near 0
+        nn.init.zeros_(self.proj.weight)
+        nn.init.zeros_(self.proj.bias)
+        self.proj.bias.data[:n_channels] = 1.0  # gamma init
+
+    def forward(self, cond: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        gb = self.proj(cond)
+        gamma, beta = gb.chunk(2, dim=-1)
+        return gamma, beta
+
+
+def apply_film(features: torch.Tensor, gamma: torch.Tensor, beta: torch.Tensor) -> torch.Tensor:
+    """Apply FiLM conditioning: gamma * features + beta.
+
+    features: (B, C, H, W) or (B, C)
+    gamma, beta: (B, C)
+    """
+    if features.dim() == 4:
+        gamma = gamma[:, :, None, None]
+        beta = beta[:, :, None, None]
+    return gamma * features + beta
+
+
 # ---------------- Model ----------------
 class ConvBlock(nn.Module):
     def __init__(self, in_c, out_c, k=3, s=1, p=1, drop=0.0):
@@ -224,8 +262,11 @@ class ConvBlock(nn.Module):
         self.act = nn.ReLU(inplace=True)
         self.dp = nn.Dropout2d(drop) if drop > 0 else nn.Identity()
 
-    def forward(self, x):
-        x = self.act(self.bn(self.conv(x)))
+    def forward(self, x, gamma=None, beta=None):
+        x = self.bn(self.conv(x))
+        if gamma is not None and beta is not None:
+            x = apply_film(x, gamma, beta)
+        x = self.act(x)
         x = self.dp(x)
         return x
 
@@ -238,17 +279,25 @@ class AttnCNN(nn.Module):
             nn.BatchNorm2d(64),
             nn.ReLU(inplace=True),
         )
-        self.body = nn.Sequential(
-            ConvBlock(64, 128, drop=0.05),
-            nn.MaxPool2d(2),
-            ConvBlock(128, 256, drop=0.05),
-            nn.AdaptiveAvgPool2d(1),
-        )
+        # Unpack blocks for FiLM injection at each stage
+        self.conv1 = ConvBlock(64, 128, drop=0.05)
+        self.pool = nn.MaxPool2d(2)
+        self.conv2 = ConvBlock(128, 256, drop=0.05)
+        self.gap = nn.AdaptiveAvgPool2d(1)
         self.fc = nn.Linear(256, out_dim)
 
-    def forward(self, x):
+    def forward(self, x, film_params=None):
+        """Forward pass with optional FiLM conditioning.
+
+        film_params: dict with 'gamma1','beta1','gamma2','beta2' or None
+        """
         x = self.adapter(x)
-        x = self.body(x).flatten(1)
+        g1, b1 = (film_params["gamma1"], film_params["beta1"]) if film_params else (None, None)
+        g2, b2 = (film_params["gamma2"], film_params["beta2"]) if film_params else (None, None)
+        x = self.conv1(x, g1, b1)
+        x = self.pool(x)
+        x = self.conv2(x, g2, b2)
+        x = self.gap(x).flatten(1)
         return self.fc(x)
 
 
@@ -275,6 +324,11 @@ class GatedHybridClassifier(nn.Module):
         self.transformer_head = nn.Linear(cls_dim, num_classes)
         self.cnn = AttnCNN(attn_in_ch, out_dim=256)
         self.stats_mlp = MLP(stats_dim, out_dim=128)
+
+        # FiLM generators: stats → conditioning params for each CNN stage
+        self.film1 = FiLMGenerator(stats_dim, n_channels=128)  # conv1 output channels
+        self.film2 = FiLMGenerator(stats_dim, n_channels=256)  # conv2 output channels
+
         cnn_combined_dim = 256 + 128
         self.cnn_head = nn.Linear(cnn_combined_dim, num_classes)
         self.conf_head = nn.Linear(cnn_combined_dim, 1)
@@ -282,7 +336,16 @@ class GatedHybridClassifier(nn.Module):
 
     def forward(self, attn_img, cls_vec, stats_vec):
         vanilla_logits = self.transformer_head(cls_vec)
-        cnn_feat = self.cnn(attn_img)
+
+        # Generate FiLM parameters from stats
+        gamma1, beta1 = self.film1(stats_vec)
+        gamma2, beta2 = self.film2(stats_vec)
+        film_params = {
+            "gamma1": gamma1, "beta1": beta1,
+            "gamma2": gamma2, "beta2": beta2,
+        }
+
+        cnn_feat = self.cnn(attn_img, film_params=film_params)
         stats_feat = self.stats_mlp(stats_vec)
         combined = torch.cat([cnn_feat, stats_feat], dim=1)
         cnn_logits = self.cnn_head(combined)
