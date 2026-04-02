@@ -1,6 +1,3 @@
-# keep ignoring tests (existing)
-tests
-
 # python bytecode / build
 __pycache__/
 *.py[cod]
