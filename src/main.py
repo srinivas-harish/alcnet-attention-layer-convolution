@@ -376,6 +376,8 @@ class AlcnetCfg:
     max_val_samples: int | None = None
     max_train_batches: int | None = None
     max_val_batches: int | None = None
+    # schedule
+    warmup_ratio: float = 0.06  # fraction of total steps for LR warmup
     # toggles
     gradient_checkpointing: bool = True
 
@@ -494,7 +496,15 @@ def train_and_eval(
         ]
     )
     total_steps = max(1, math.ceil(len(train_dl)) * cfg.epochs)
-    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=total_steps)
+    warmup_steps = max(1, int(total_steps * cfg.warmup_ratio))
+
+    def lr_lambda(current_step: int) -> float:
+        if current_step < warmup_steps:
+            return float(current_step) / float(max(1, warmup_steps))
+        progress = float(current_step - warmup_steps) / float(max(1, total_steps - warmup_steps))
+        return max(0.0, 0.5 * (1.0 + math.cos(math.pi * progress)))
+
+    sched = torch.optim.lr_scheduler.LambdaLR(opt, lr_lambda)
     scaler = torch.amp.GradScaler('cuda', enabled=(device.type == "cuda"))
     ce_loss = nn.CrossEntropyLoss(label_smoothing=cfg.label_smoothing)
 
