@@ -367,6 +367,7 @@ class AlcnetCfg:
     weight_decay: float = 1e-4
     label_smoothing: float = 0.05
     grad_clip: float = 1.0
+    grad_accumulation_steps: int = 1
     attn_layers: tuple[int, int, int] = (-3, -2, -1)
     attn_size: int = 128
     seed: int = GLOBAL_SEED
@@ -532,18 +533,26 @@ def train_and_eval(
                 S = attn_stats_21(att_list, layer_idx).to(device, non_blocking=True)
 
                 with nvtx_range("forward", enabled=(device.type == "cuda")), torch.autocast(device_type="cuda", dtype=torch.float16, enabled=(device.type == "cuda")):
-                        logits = model(X, cls_vec, S)
-                        loss = ce_loss(logits, y)
+                    logits = model(X, cls_vec, S)
+                    loss = ce_loss(logits, y)
+                    if cfg.grad_accumulation_steps > 1:
+                        loss = loss / cfg.grad_accumulation_steps
 
                 scaler.scale(loss).backward()
-                scaler.unscale_(opt)
-                if cfg.grad_clip and cfg.grad_clip > 0:
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip)
-                    if enc_params:
-                        torch.nn.utils.clip_grad_norm_(enc_params, cfg.grad_clip)
-                with nvtx_range("step", enabled=(device.type == "cuda")):
-                    scaler.step(opt); scaler.update(); opt.zero_grad(set_to_none=True); sched.step()
-                step += 1
+
+                is_accumulation_step = (bi + 1) % cfg.grad_accumulation_steps == 0 or (bi + 1) == len(train_dl)
+                if is_accumulation_step:
+                    scaler.unscale_(opt)
+                    if cfg.grad_clip and cfg.grad_clip > 0:
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip)
+                        if enc_params:
+                            torch.nn.utils.clip_grad_norm_(enc_params, cfg.grad_clip)
+                    with nvtx_range("step", enabled=(device.type == "cuda")):
+                        scaler.step(opt)
+                        scaler.update()
+                        opt.zero_grad(set_to_none=True)
+                        sched.step()
+                    step += 1
 
                 with torch.no_grad():
                     pred = logits.argmax(dim=1)
