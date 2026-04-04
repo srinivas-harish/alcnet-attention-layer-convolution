@@ -378,6 +378,7 @@ class AlcnetCfg:
     max_val_batches: int | None = None
     # schedule
     warmup_ratio: float = 0.06  # fraction of total steps for LR warmup
+    early_stopping_patience: int = 0  # 0 = disabled; N > 0 = stop after N epochs without improvement
     # toggles
     gradient_checkpointing: bool = True
 
@@ -514,6 +515,7 @@ def train_and_eval(
     logs: list[dict[str, Any]] = []
     best = {"val_acc": -1.0, "epoch": -1, "val_f1": None}
     step = 0
+    patience_counter = 0
 
     for ep in range(1, cfg.epochs + 1):
         encoder.train(); model.train()
@@ -577,6 +579,7 @@ def train_and_eval(
 
         if val_acc > best["val_acc"]:
             best = {"val_acc": float(val_acc), "epoch": ep, "val_f1": float(val_f1)}
+            patience_counter = 0
             if save_dir and save_artifacts:
                 with contextlib.suppress(Exception):
                     torch.save(
@@ -592,6 +595,12 @@ def train_and_eval(
                         },
                         os.path.join(save_dir, "model.pt"),
                     )
+        else:
+            patience_counter += 1
+
+        if cfg.early_stopping_patience > 0 and patience_counter >= cfg.early_stopping_patience:
+            logger.info("Early stopping at epoch %d (no improvement for %d epochs)", ep, cfg.early_stopping_patience)
+            break
 
     return {
         "seed": cfg.seed,
