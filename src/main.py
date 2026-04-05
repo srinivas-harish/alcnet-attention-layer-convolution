@@ -538,6 +538,11 @@ def train_and_eval(
                     if cfg.grad_accumulation_steps > 1:
                         loss = loss / cfg.grad_accumulation_steps
 
+                if torch.isnan(loss) or torch.isinf(loss):
+                    logger.warning("NaN/Inf loss at epoch %d batch %d — skipping", ep, bi)
+                    opt.zero_grad(set_to_none=True)
+                    continue
+
                 scaler.scale(loss).backward()
 
                 is_accumulation_step = (bi + 1) % cfg.grad_accumulation_steps == 0 or (bi + 1) == len(train_dl)
