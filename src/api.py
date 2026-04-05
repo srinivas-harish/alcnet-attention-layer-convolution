@@ -1,3 +1,4 @@
+import os
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query
@@ -19,15 +20,18 @@ from .worker import run_train_task
 
 app = FastAPI(title="alcnet Service", version="0.1.0")
 
-# CORS for local frontend dev (Vite on :5173 et al.)
+# CORS: configurable via CORS_ORIGINS env var (comma-separated), defaults to common local dev ports
+_DEFAULT_ORIGINS = [
+    "http://localhost:5173", "http://127.0.0.1:5173",
+    "http://localhost:5174", "http://127.0.0.1:5174",
+    "http://localhost:5175", "http://127.0.0.1:5175",
+]
+_cors_origins_env = os.getenv("CORS_ORIGINS")
+_cors_origins = [o.strip() for o in _cors_origins_env.split(",") if o.strip()] if _cors_origins_env else _DEFAULT_ORIGINS
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173", "http://127.0.0.1:5173",
-        "http://localhost:5174", "http://127.0.0.1:5174",
-        "http://localhost:5175", "http://127.0.0.1:5175",
-        "http://0.0.0.0:5173",
-    ],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
