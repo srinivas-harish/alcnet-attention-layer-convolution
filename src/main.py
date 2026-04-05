@@ -259,7 +259,7 @@ class ConvBlock(nn.Module):
         super().__init__()
         self.conv = nn.Conv2d(in_c, out_c, k, s, p, bias=False)
         self.bn = nn.BatchNorm2d(out_c)
-        self.act = nn.ReLU(inplace=True)
+        self.act = nn.GELU()
         self.dp = nn.Dropout2d(drop) if drop > 0 else nn.Identity()
 
     def forward(self, x, gamma=None, beta=None):
@@ -277,7 +277,7 @@ class AttnCNN(nn.Module):
         self.adapter = nn.Sequential(
             nn.Conv2d(in_ch, 64, kernel_size=1, bias=False),
             nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
+            nn.GELU(),
         )
         # Unpack blocks for FiLM injection at each stage
         self.conv1 = ConvBlock(64, 128, drop=0.05)
@@ -310,10 +310,10 @@ class MLP(nn.Module):
         self.net = nn.Sequential(
             nn.LayerNorm(in_dim),
             nn.Linear(in_dim, hidden),
-            nn.ReLU(inplace=True),
+            nn.GELU(),
             nn.Dropout(0.1),
             nn.Linear(hidden, out_dim),
-            nn.ReLU(inplace=True),
+            nn.GELU(),
         )
 
     def forward(self, x):
