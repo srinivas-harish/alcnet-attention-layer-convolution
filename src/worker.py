@@ -89,7 +89,8 @@ def run_train_task(self, run_id: str, req: dict):
         # Run training (in-process)
         result = run_from_req(req, run_id=run_id, save_dir=save_dir, progress_file=progress_path)
 
-        stop_evt.set(); t.join(timeout=2.0)
+        stop_evt.set()
+        t.join(timeout=2.0)
 
         # Register obvious artifacts if present
         report_path = os.path.join(save_dir, "report.json")

@@ -519,8 +519,12 @@ def train_and_eval(
     patience_counter = 0
 
     for ep in range(1, cfg.epochs + 1):
-        encoder.train(); model.train()
-        start = time.time(); run_loss = 0.0; run_correct = 0; run_total = 0
+        encoder.train()
+        model.train()
+        start = time.time()
+        run_loss = 0.0
+        run_correct = 0
+        run_total = 0
         with nvtx_range(f"epoch_{ep}", enabled=(device.type == "cuda")):
             pbar = tqdm(train_dl, total=len(train_dl), desc=f"Epoch {ep}/{cfg.epochs}", dynamic_ncols=True, leave=False)
             for bi, batch in enumerate(pbar):
@@ -563,7 +567,9 @@ def train_and_eval(
                     pred = logits.argmax(dim=1)
                     correct = (pred == y).sum().item()
                     total = y.numel()
-                    run_correct += correct; run_total += total; run_loss += float(loss.item()) * total
+                    run_correct += correct
+                    run_total += total
+                    run_loss += float(loss.item()) * total
                     pbar.set_postfix_str(
                         f"loss={run_loss/max(1,run_total):.4f} | acc={100.0*run_correct/max(1,run_total):.2f}%"
                     )
