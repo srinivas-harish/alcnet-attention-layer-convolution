@@ -80,32 +80,33 @@ class nvtx_range:
 
 # ---------------- Data ----------------
 class RTEDataset(Dataset):
+    """Pre-tokenized RTE dataset. Tokenization happens once at init, not per __getitem__."""
+
     def __init__(self, df, tokenizer, max_len: int):
-        self.prem = df["sentence1"]
-        self.hyp = df["sentence2"]
-        self.labels = df["label"].astype(np.int64)
-        self.tok = tokenizer
-        self.max_len = max_len
+        premises = list(df["sentence1"])
+        hypotheses = list(df["sentence2"])
+        self.labels = torch.tensor(df["label"].astype(np.int64).values, dtype=torch.long)
+
+        # Batch-tokenize the entire dataset once
+        enc = tokenizer(
+            premises,
+            hypotheses,
+            max_length=max_len,
+            padding="max_length",
+            truncation=True,
+            return_tensors="pt",
+        )
+        self.input_ids = enc["input_ids"]
+        self.attention_mask = enc["attention_mask"]
 
     def __len__(self):
         return len(self.labels)
 
     def __getitem__(self, idx):
-        p = self.prem.iloc[idx] if hasattr(self.prem, "iloc") else self.prem[idx]
-        h = self.hyp.iloc[idx] if hasattr(self.hyp, "iloc") else self.hyp[idx]
-        y = int(self.labels.iloc[idx]) if hasattr(self.labels, "iloc") else int(self.labels[idx])
-        enc = self.tok(
-            p,
-            h,
-            max_length=self.max_len,
-            padding="max_length",
-            truncation=True,
-            return_tensors="pt",
-        )
         return {
-            "input_ids": enc["input_ids"].squeeze(0),
-            "attention_mask": enc["attention_mask"].squeeze(0),
-            "label": torch.tensor(y, dtype=torch.long),
+            "input_ids": self.input_ids[idx],
+            "attention_mask": self.attention_mask[idx],
+            "label": self.labels[idx],
         }
 
 
