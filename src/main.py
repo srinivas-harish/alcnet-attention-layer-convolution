@@ -255,6 +255,29 @@ def apply_film(features: torch.Tensor, gamma: torch.Tensor, beta: torch.Tensor) 
 
 
 # ---------------- Model ----------------
+class SEBlock(nn.Module):
+    """Squeeze-and-Excitation block for channel attention.
+
+    Reference: Hu et al., "Squeeze-and-Excitation Networks", CVPR 2018.
+    """
+
+    def __init__(self, channels: int, reduction: int = 4):
+        super().__init__()
+        mid = max(1, channels // reduction)
+        self.se = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Flatten(),
+            nn.Linear(channels, mid),
+            nn.GELU(),
+            nn.Linear(mid, channels),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        scale = self.se(x).unsqueeze(-1).unsqueeze(-1)
+        return x * scale
+
+
 class ConvBlock(nn.Module):
     def __init__(self, in_c, out_c, k=3, s=1, p=1, drop=0.0):
         super().__init__()
@@ -282,9 +305,11 @@ class AttnCNN(nn.Module):
         )
         # Unpack blocks for FiLM injection at each stage
         self.conv1 = ConvBlock(64, 128, drop=0.05)
+        self.se1 = SEBlock(128)
         self.shortcut1 = nn.Conv2d(64, 128, kernel_size=1, bias=False)
         self.pool = nn.MaxPool2d(2)
         self.conv2 = ConvBlock(128, 256, drop=0.05)
+        self.se2 = SEBlock(256)
         self.shortcut2 = nn.Conv2d(128, 256, kernel_size=1, bias=False)
         self.gap = nn.AdaptiveAvgPool2d(1)
         self.fc = nn.Linear(256, out_dim)
@@ -297,9 +322,9 @@ class AttnCNN(nn.Module):
         x = self.adapter(x)
         g1, b1 = (film_params["gamma1"], film_params["beta1"]) if film_params else (None, None)
         g2, b2 = (film_params["gamma2"], film_params["beta2"]) if film_params else (None, None)
-        x = self.conv1(x, g1, b1) + self.shortcut1(x)
+        x = self.se1(self.conv1(x, g1, b1)) + self.shortcut1(x)
         x = self.pool(x)
-        x = self.conv2(x, g2, b2) + self.shortcut2(x)
+        x = self.se2(self.conv2(x, g2, b2)) + self.shortcut2(x)
         x = self.gap(x).flatten(1)
         return self.fc(x)
 
