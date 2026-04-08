@@ -1,9 +1,32 @@
-"""Tests for model components: ConvBlock, AttnCNN, MLP, GatedHybridClassifier."""
+"""Tests for model components: SEBlock, ConvBlock, AttnCNN, MLP, GatedHybridClassifier."""
 
 import pytest
 import torch
 
-from src.main import MLP, AttnCNN, ConvBlock, GatedHybridClassifier
+from src.main import MLP, AttnCNN, ConvBlock, GatedHybridClassifier, SEBlock
+
+
+class TestSEBlock:
+    def test_output_shape_preserved(self):
+        se = SEBlock(channels=32, reduction=4)
+        x = torch.randn(2, 32, 8, 8)
+        out = se(x)
+        assert out.shape == x.shape
+
+    def test_scale_is_bounded(self):
+        se = SEBlock(channels=16, reduction=4)
+        x = torch.randn(2, 16, 8, 8)
+        # After sigmoid, scale should be in [0, 1]
+        scale = se.se(x).unsqueeze(-1).unsqueeze(-1)
+        assert (scale >= 0).all() and (scale <= 1).all()
+
+    def test_gradient_flow(self):
+        se = SEBlock(channels=8, reduction=2)
+        x = torch.randn(2, 8, 4, 4, requires_grad=True)
+        out = se(x)
+        loss = out.sum()
+        loss.backward()
+        assert x.grad is not None
 
 
 class TestConvBlock:
