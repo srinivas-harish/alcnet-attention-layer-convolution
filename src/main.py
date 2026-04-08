@@ -661,7 +661,16 @@ def train_and_eval(
 
 
 __all__ = [
+    "MLP",
     "AlcnetCfg",
+    "AttnCNN",
+    "ConvBlock",
+    "FiLMGenerator",
+    "GatedHybridClassifier",
+    "SEBlock",
+    "apply_film",
+    "attn_stats_21",
+    "build_attn_tensor",
     "pick_device",
     "set_all_seeds",
     "train_and_eval",
