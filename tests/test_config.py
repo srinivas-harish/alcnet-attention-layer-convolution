@@ -22,10 +22,12 @@ class TestEffectiveNumWorkers:
     def test_none_returns_zero(self):
         assert effective_num_workers(None) == 0
 
-    def test_positive_value(self):
+    def test_positive_value(self, monkeypatch):
+        monkeypatch.delenv("IN_CELERY", raising=False)
         assert effective_num_workers(4) == 4
 
-    def test_negative_clamped_to_zero(self):
+    def test_negative_clamped_to_zero(self, monkeypatch):
+        monkeypatch.delenv("IN_CELERY", raising=False)
         assert effective_num_workers(-1) == 0
 
     def test_celery_env_forces_zero(self, monkeypatch):
