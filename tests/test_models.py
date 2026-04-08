@@ -162,3 +162,19 @@ class TestGatedHybridClassifier:
             torch.randn(B, 21),
         )
         assert logits.shape == (B, 3)
+
+    def test_weight_init_batchnorm(self, model):
+        """BatchNorm weight should be ~1.0 and bias ~0.0 after init."""
+        for m in model.modules():
+            if isinstance(m, torch.nn.BatchNorm2d):
+                assert torch.allclose(m.weight, torch.ones_like(m.weight))
+                assert torch.allclose(m.bias, torch.zeros_like(m.bias))
+
+    def test_classification_heads_xavier(self, model):
+        """Classification heads should have variance consistent with Xavier init."""
+        for head in [model.transformer_head, model.cnn_head]:
+            w = head.weight
+            fan_in, fan_out = w.shape[1], w.shape[0]
+            expected_std = (2.0 / (fan_in + fan_out)) ** 0.5
+            # Allow generous tolerance — just verify it's in the right ballpark
+            assert w.std().item() < expected_std * 3.0

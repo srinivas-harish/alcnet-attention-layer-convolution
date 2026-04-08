@@ -346,6 +346,21 @@ class MLP(nn.Module):
         return self.net(x)
 
 
+def _init_weights(m: nn.Module) -> None:
+    """Kaiming init for conv/linear with GELU, Xavier for classification heads."""
+    if isinstance(m, nn.Conv2d):
+        nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="linear")
+        if m.bias is not None:
+            nn.init.zeros_(m.bias)
+    elif isinstance(m, nn.Linear):
+        nn.init.kaiming_normal_(m.weight, mode="fan_in", nonlinearity="linear")
+        if m.bias is not None:
+            nn.init.zeros_(m.bias)
+    elif isinstance(m, (nn.BatchNorm2d, nn.LayerNorm)):
+        nn.init.ones_(m.weight)
+        nn.init.zeros_(m.bias)
+
+
 class GatedHybridClassifier(nn.Module):
     def __init__(self, attn_in_ch: int, cls_dim: int, stats_dim: int = 21, num_classes: int = 2):
         super().__init__()
@@ -361,6 +376,12 @@ class GatedHybridClassifier(nn.Module):
         self.cnn_head = nn.Linear(cnn_combined_dim, num_classes)
         self.conf_head = nn.Linear(cnn_combined_dim, 1)
         nn.init.constant_(self.conf_head.bias, -2.0)
+
+        # Apply init to CNN/MLP submodules, then Xavier for classification heads
+        self.cnn.apply(_init_weights)
+        self.stats_mlp.apply(_init_weights)
+        nn.init.xavier_uniform_(self.transformer_head.weight)
+        nn.init.xavier_uniform_(self.cnn_head.weight)
 
     def forward(self, attn_img, cls_vec, stats_vec):
         vanilla_logits = self.transformer_head(cls_vec)
