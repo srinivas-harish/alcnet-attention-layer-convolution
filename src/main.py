@@ -368,6 +368,34 @@ class MLP(nn.Module):
         return self.net(x)
 
 
+class ModelEMA:
+    """Exponential moving average of model parameters.
+
+    Maintains a shadow copy of model weights: shadow = decay * shadow + (1-decay) * param.
+    Use context manager for evaluation with EMA weights.
+    """
+
+    def __init__(self, model: nn.Module, decay: float = 0.999):
+        self.decay = decay
+        self.shadow = {k: v.clone().detach() for k, v in model.state_dict().items()}
+        self.model = model
+
+    @torch.no_grad()
+    def update(self) -> None:
+        for k, v in self.model.state_dict().items():
+            self.shadow[k].mul_(self.decay).add_(v, alpha=1.0 - self.decay)
+
+    @contextlib.contextmanager
+    def apply(self):
+        """Context manager: temporarily swap in EMA weights for eval."""
+        original = {k: v.clone() for k, v in self.model.state_dict().items()}
+        self.model.load_state_dict(self.shadow)
+        try:
+            yield
+        finally:
+            self.model.load_state_dict(original)
+
+
 def _init_weights(m: nn.Module) -> None:
     """Kaiming init for conv/linear with GELU, Xavier for classification heads."""
     if isinstance(m, nn.Conv2d):
@@ -455,6 +483,7 @@ class AlcnetCfg:
     # toggles
     gradient_checkpointing: bool = True
     compile_model: bool = False  # torch.compile() — requires PyTorch 2.0+
+    ema_decay: float = 0.0  # EMA of model weights; >0 enables (e.g. 0.999)
 
 
 def parse_layers(sel: tuple[int, ...], n_layers: int) -> list[int]:
@@ -565,6 +594,8 @@ def train_and_eval(
         logger.info("Compiling model with torch.compile()")
         model = torch.compile(model)
 
+    ema = ModelEMA(model, decay=cfg.ema_decay) if cfg.ema_decay > 0 else None
+
     enc_params = list(encoder.parameters())
     head_params = list(model.parameters())
 
@@ -651,6 +682,8 @@ def train_and_eval(
                         scaler.update()
                         opt.zero_grad(set_to_none=True)
                         sched.step()
+                    if ema is not None:
+                        ema.update()
                     step += 1
 
                 with torch.no_grad():
@@ -666,9 +699,11 @@ def train_and_eval(
                 if cfg.max_train_batches and (bi + 1) >= cfg.max_train_batches:
                     break
 
-        val_acc, val_f1 = evaluate(
-            encoder, model, val_dl, device, layer_idx, cfg.attn_size, max_batches=cfg.max_val_batches
-        )
+        ema_ctx = ema.apply() if ema is not None else contextlib.nullcontext()
+        with ema_ctx:
+            val_acc, val_f1 = evaluate(
+                encoder, model, val_dl, device, layer_idx, cfg.attn_size, max_batches=cfg.max_val_batches
+            )
 
         ep_row = {
             "epoch": ep,
@@ -730,6 +765,7 @@ __all__ = [
     "DropPath",
     "FiLMGenerator",
     "GatedHybridClassifier",
+    "ModelEMA",
     "SEBlock",
     "apply_film",
     "attn_stats_21",

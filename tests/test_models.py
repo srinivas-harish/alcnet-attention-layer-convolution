@@ -3,7 +3,7 @@
 import pytest
 import torch
 
-from src.main import MLP, AttnCNN, ConvBlock, DropPath, GatedHybridClassifier, SEBlock
+from src.main import MLP, AttnCNN, ConvBlock, DropPath, GatedHybridClassifier, ModelEMA, SEBlock
 
 
 class TestDropPath:
@@ -216,3 +216,34 @@ class TestGatedHybridClassifier:
             expected_std = (2.0 / (fan_in + fan_out)) ** 0.5
             # Allow generous tolerance — just verify it's in the right ballpark
             assert w.std().item() < expected_std * 3.0
+
+
+class TestModelEMA:
+    def test_shadow_initialized_from_model(self):
+        model = torch.nn.Linear(4, 2)
+        ema = ModelEMA(model, decay=0.99)
+        for k, v in model.state_dict().items():
+            assert torch.equal(ema.shadow[k], v)
+
+    def test_update_moves_shadow(self):
+        model = torch.nn.Linear(4, 2)
+        ema = ModelEMA(model, decay=0.5)
+        original_weight = ema.shadow["weight"].clone()
+        # Change model weights
+        with torch.no_grad():
+            model.weight.fill_(10.0)
+        ema.update()
+        # Shadow should move toward 10.0
+        assert not torch.equal(ema.shadow["weight"], original_weight)
+
+    def test_apply_context_restores_weights(self):
+        model = torch.nn.Linear(4, 2)
+        ema = ModelEMA(model, decay=0.5)
+        with torch.no_grad():
+            model.weight.fill_(99.0)
+        ema.update()
+        # Inside apply(), model should have EMA weights
+        with ema.apply():
+            assert not torch.equal(model.weight, torch.full_like(model.weight, 99.0))
+        # After exiting, model should have current weights restored
+        assert torch.equal(model.weight, torch.full_like(model.weight, 99.0))
