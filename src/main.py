@@ -255,6 +255,26 @@ def apply_film(features: torch.Tensor, gamma: torch.Tensor, beta: torch.Tensor) 
 
 
 # ---------------- Model ----------------
+class DropPath(nn.Module):
+    """Stochastic Depth per sample (Huang et al., 2016).
+
+    During training, randomly drops the entire residual branch with probability
+    `drop_prob`. At eval, acts as identity.
+    """
+
+    def __init__(self, drop_prob: float = 0.0):
+        super().__init__()
+        self.drop_prob = drop_prob
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if not self.training or self.drop_prob == 0.0:
+            return x
+        keep = 1.0 - self.drop_prob
+        shape = (x.shape[0],) + (1,) * (x.ndim - 1)
+        mask = (torch.rand(shape, dtype=x.dtype, device=x.device) + keep).floor_()
+        return x * mask / keep
+
+
 class SEBlock(nn.Module):
     """Squeeze-and-Excitation block for channel attention.
 
@@ -296,7 +316,7 @@ class ConvBlock(nn.Module):
 
 
 class AttnCNN(nn.Module):
-    def __init__(self, in_ch: int, out_dim: int = 256):
+    def __init__(self, in_ch: int, out_dim: int = 256, drop_path: float = 0.1):
         super().__init__()
         self.adapter = nn.Sequential(
             nn.Conv2d(in_ch, 64, kernel_size=1, bias=False),
@@ -307,10 +327,12 @@ class AttnCNN(nn.Module):
         self.conv1 = ConvBlock(64, 128, drop=0.05)
         self.se1 = SEBlock(128)
         self.shortcut1 = nn.Conv2d(64, 128, kernel_size=1, bias=False)
+        self.drop_path1 = DropPath(drop_path)
         self.pool = nn.MaxPool2d(2)
         self.conv2 = ConvBlock(128, 256, drop=0.05)
         self.se2 = SEBlock(256)
         self.shortcut2 = nn.Conv2d(128, 256, kernel_size=1, bias=False)
+        self.drop_path2 = DropPath(drop_path)
         self.gap = nn.AdaptiveAvgPool2d(1)
         self.fc = nn.Linear(256, out_dim)
 
@@ -322,9 +344,9 @@ class AttnCNN(nn.Module):
         x = self.adapter(x)
         g1, b1 = (film_params["gamma1"], film_params["beta1"]) if film_params else (None, None)
         g2, b2 = (film_params["gamma2"], film_params["beta2"]) if film_params else (None, None)
-        x = self.se1(self.conv1(x, g1, b1)) + self.shortcut1(x)
+        x = self.drop_path1(self.se1(self.conv1(x, g1, b1))) + self.shortcut1(x)
         x = self.pool(x)
-        x = self.se2(self.conv2(x, g2, b2)) + self.shortcut2(x)
+        x = self.drop_path2(self.se2(self.conv2(x, g2, b2))) + self.shortcut2(x)
         x = self.gap(x).flatten(1)
         return self.fc(x)
 
@@ -691,6 +713,7 @@ __all__ = [
     "AlcnetCfg",
     "AttnCNN",
     "ConvBlock",
+    "DropPath",
     "FiLMGenerator",
     "GatedHybridClassifier",
     "SEBlock",

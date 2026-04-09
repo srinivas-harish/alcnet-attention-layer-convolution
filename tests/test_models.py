@@ -3,7 +3,45 @@
 import pytest
 import torch
 
-from src.main import MLP, AttnCNN, ConvBlock, GatedHybridClassifier, SEBlock
+from src.main import MLP, AttnCNN, ConvBlock, DropPath, GatedHybridClassifier, SEBlock
+
+
+class TestDropPath:
+    def test_eval_is_identity(self):
+        dp = DropPath(drop_prob=0.5)
+        dp.eval()
+        x = torch.randn(4, 8, 4, 4)
+        assert torch.equal(dp(x), x)
+
+    def test_zero_drop_is_identity(self):
+        dp = DropPath(drop_prob=0.0)
+        dp.train()
+        x = torch.randn(4, 8, 4, 4)
+        assert torch.equal(dp(x), x)
+
+    def test_train_applies_masking(self):
+        torch.manual_seed(0)
+        dp = DropPath(drop_prob=0.99)
+        dp.train()
+        x = torch.ones(100, 8, 2, 2)
+        out = dp(x)
+        # With 99% drop, most samples should be zeroed
+        zero_samples = (out.sum(dim=(1, 2, 3)) == 0).sum().item()
+        assert zero_samples > 50
+
+    def test_output_shape_preserved(self):
+        dp = DropPath(drop_prob=0.3)
+        dp.train()
+        x = torch.randn(4, 16, 8, 8)
+        assert dp(x).shape == x.shape
+
+    def test_gradient_flow(self):
+        dp = DropPath(drop_prob=0.3)
+        dp.train()
+        x = torch.randn(4, 8, 4, 4, requires_grad=True)
+        out = dp(x)
+        out.sum().backward()
+        assert x.grad is not None
 
 
 class TestSEBlock:
