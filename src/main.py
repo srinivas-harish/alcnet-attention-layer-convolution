@@ -431,6 +431,7 @@ class AlcnetCfg:
     early_stopping_patience: int = 0  # 0 = disabled; N > 0 = stop after N epochs without improvement
     # toggles
     gradient_checkpointing: bool = True
+    compile_model: bool = False  # torch.compile() — requires PyTorch 2.0+
 
 
 def parse_layers(sel: tuple[int, ...], n_layers: int) -> list[int]:
@@ -536,6 +537,10 @@ def train_and_eval(
         cls_dim = int(cls_probe.shape[1])
 
     model = GatedHybridClassifier(attn_in_ch=in_ch, cls_dim=cls_dim, stats_dim=21, num_classes=2).to(device)
+
+    if cfg.compile_model and hasattr(torch, "compile"):
+        logger.info("Compiling model with torch.compile()")
+        model = torch.compile(model)
 
     enc_params = list(encoder.parameters())
     head_params = list(model.parameters())
