@@ -247,3 +247,41 @@ class TestModelEMA:
             assert not torch.equal(model.weight, torch.full_like(model.weight, 99.0))
         # After exiting, model should have current weights restored
         assert torch.equal(model.weight, torch.full_like(model.weight, 99.0))
+
+
+class TestAblation:
+    @pytest.fixture
+    def model(self):
+        return GatedHybridClassifier(attn_in_ch=8, cls_dim=32, stats_dim=21, num_classes=2)
+
+    @pytest.fixture
+    def inputs(self):
+        B = 2
+        return torch.randn(B, 8, 32, 32), torch.randn(B, 32), torch.randn(B, 21)
+
+    def test_no_cnn_returns_transformer_only(self, model, inputs):
+        attn_img, cls_vec, stats_vec = inputs
+        logits = model(attn_img, cls_vec, stats_vec, ablation="no_cnn")
+        expected = model.transformer_head(cls_vec)
+        assert torch.allclose(logits, expected)
+
+    def test_no_film_disables_film(self, model, inputs):
+        attn_img, cls_vec, stats_vec = inputs
+        model.eval()
+        logits = model(attn_img, cls_vec, stats_vec, ablation="no_film")
+        assert logits.shape == (2, 2)
+        assert torch.isfinite(logits).all()
+
+    def test_no_stats_zeros_stats_branch(self, model, inputs):
+        attn_img, cls_vec, stats_vec = inputs
+        model.eval()
+        logits = model(attn_img, cls_vec, stats_vec, ablation="no_stats")
+        assert logits.shape == (2, 2)
+        assert torch.isfinite(logits).all()
+
+    def test_none_ablation_is_default(self, model, inputs):
+        attn_img, cls_vec, stats_vec = inputs
+        model.eval()
+        logits_none = model(attn_img, cls_vec, stats_vec, ablation=None)
+        logits_default = model(attn_img, cls_vec, stats_vec)
+        assert torch.equal(logits_none, logits_default)

@@ -29,6 +29,8 @@ def run_from_req(req: dict[str, Any], *, run_id: str | None = None, save_dir: st
         cfg.max_len = int(req["max_len"]) or cfg.max_len
     if "gradient_checkpointing" in req:
         cfg.gradient_checkpointing = bool(req["gradient_checkpointing"])
+    if req.get("ablation"):
+        cfg.ablation = str(req["ablation"])
 
     # Apply overrides into cfg — only allow known AlcnetCfg fields
     overrides = req.get("overrides") or {}

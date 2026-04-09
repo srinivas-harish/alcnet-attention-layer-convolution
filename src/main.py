@@ -433,19 +433,31 @@ class GatedHybridClassifier(nn.Module):
         nn.init.xavier_uniform_(self.transformer_head.weight)
         nn.init.xavier_uniform_(self.cnn_head.weight)
 
-    def forward(self, attn_img, cls_vec, stats_vec):
+    def forward(self, attn_img, cls_vec, stats_vec, ablation: str | None = None):
         vanilla_logits = self.transformer_head(cls_vec)
 
+        if ablation == "no_cnn":
+            return vanilla_logits
+
         # Generate FiLM parameters from stats
-        gamma1, beta1 = self.film1(stats_vec)
-        gamma2, beta2 = self.film2(stats_vec)
-        film_params = {
-            "gamma1": gamma1, "beta1": beta1,
-            "gamma2": gamma2, "beta2": beta2,
-        }
+        use_film = ablation != "no_film"
+        if use_film:
+            gamma1, beta1 = self.film1(stats_vec)
+            gamma2, beta2 = self.film2(stats_vec)
+            film_params = {
+                "gamma1": gamma1, "beta1": beta1,
+                "gamma2": gamma2, "beta2": beta2,
+            }
+        else:
+            film_params = None
 
         cnn_feat = self.cnn(attn_img, film_params=film_params)
-        stats_feat = self.stats_mlp(stats_vec)
+
+        if ablation == "no_stats":
+            stats_feat = torch.zeros(stats_vec.shape[0], 128, device=stats_vec.device)
+        else:
+            stats_feat = self.stats_mlp(stats_vec)
+
         combined = torch.cat([cnn_feat, stats_feat], dim=1)
         cnn_logits = self.cnn_head(combined)
         conf = torch.sigmoid(self.conf_head(combined))
@@ -484,6 +496,7 @@ class AlcnetCfg:
     gradient_checkpointing: bool = True
     compile_model: bool = False  # torch.compile() — requires PyTorch 2.0+
     ema_decay: float = 0.0  # EMA of model weights; >0 enables (e.g. 0.999)
+    ablation: str | None = None  # "no_cnn" | "no_stats" | "no_film" | None
 
 
 def parse_layers(sel: tuple[int, ...], n_layers: int) -> list[int]:
@@ -534,7 +547,7 @@ def build_loaders(cfg: AlcnetCfg, device: torch.device, dataloader_workers: int 
 
 
 @torch.no_grad()
-def evaluate(encoder, model, dl, device, layer_idx, attn_size, max_batches=None) -> tuple[float, float]:
+def evaluate(encoder, model, dl, device, layer_idx, attn_size, max_batches=None, ablation: str | None = None) -> tuple[float, float]:
     encoder.eval()
     model.eval()
     preds, gts = [], []
@@ -548,7 +561,7 @@ def evaluate(encoder, model, dl, device, layer_idx, attn_size, max_batches=None)
         S = attn_stats_21(att_list, layer_idx).to(device, non_blocking=True)
 
         with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=(device.type == "cuda")):
-            logits = model(X, cls_vec, S)
+            logits = model(X, cls_vec, S, ablation=ablation)
         p = logits.argmax(dim=1)
         preds.append(p.cpu())
         gts.append(y.cpu())
@@ -646,7 +659,7 @@ def train_and_eval(
                 S = attn_stats_21(att_list, layer_idx).to(device, non_blocking=True)
 
                 with nvtx_range("forward", enabled=(device.type == "cuda")), torch.autocast(device_type=device.type, dtype=torch.float16, enabled=use_amp):
-                    logits = model(X, cls_vec, S)
+                    logits = model(X, cls_vec, S, ablation=cfg.ablation)
                     loss = ce_loss(logits, y)
 
                     # R-Drop: second forward pass with different dropout, KL between both
@@ -703,7 +716,8 @@ def train_and_eval(
         ema_ctx = ema.apply() if ema is not None else contextlib.nullcontext()
         with ema_ctx:
             val_acc, val_f1 = evaluate(
-                encoder, model, val_dl, device, layer_idx, cfg.attn_size, max_batches=cfg.max_val_batches
+                encoder, model, val_dl, device, layer_idx, cfg.attn_size,
+                max_batches=cfg.max_val_batches, ablation=cfg.ablation,
             )
 
         ep_row = {
