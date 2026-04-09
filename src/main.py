@@ -437,6 +437,7 @@ class AlcnetCfg:
     lr_encoder: float = 8e-6
     weight_decay: float = 1e-4
     label_smoothing: float = 0.05
+    rdrop_alpha: float = 0.0  # R-Drop KL weight; >0 enables R-Drop (Liang et al., 2021)
     grad_clip: float = 1.0
     grad_accumulation_steps: int = 1
     attn_layers: tuple[int, int, int] = (-3, -2, -1)
@@ -615,6 +616,19 @@ def train_and_eval(
                 with nvtx_range("forward", enabled=(device.type == "cuda")), torch.autocast(device_type="cuda", dtype=torch.float16, enabled=(device.type == "cuda")):
                     logits = model(X, cls_vec, S)
                     loss = ce_loss(logits, y)
+
+                    # R-Drop: second forward pass with different dropout, KL between both
+                    if cfg.rdrop_alpha > 0:
+                        logits2 = model(X, cls_vec, S)
+                        loss2 = ce_loss(logits2, y)
+                        p = F.log_softmax(logits, dim=-1)
+                        q = F.log_softmax(logits2, dim=-1)
+                        kl = 0.5 * (
+                            F.kl_div(p, q.exp(), reduction="batchmean")
+                            + F.kl_div(q, p.exp(), reduction="batchmean")
+                        )
+                        loss = 0.5 * (loss + loss2) + cfg.rdrop_alpha * kl
+
                     if cfg.grad_accumulation_steps > 1:
                         loss = loss / cfg.grad_accumulation_steps
 
