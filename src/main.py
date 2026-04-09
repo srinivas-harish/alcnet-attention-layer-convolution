@@ -547,7 +547,7 @@ def evaluate(encoder, model, dl, device, layer_idx, attn_size, max_batches=None)
         X = build_attn_tensor(att_list, layer_idx, attn_size, True).to(device, non_blocking=True)
         S = attn_stats_21(att_list, layer_idx).to(device, non_blocking=True)
 
-        with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=(device.type == "cuda")):
+        with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=(device.type == "cuda")):
             logits = model(X, cls_vec, S)
         p = logits.argmax(dim=1)
         preds.append(p.cpu())
@@ -615,7 +615,8 @@ def train_and_eval(
         return max(0.0, 0.5 * (1.0 + math.cos(math.pi * progress)))
 
     sched = torch.optim.lr_scheduler.LambdaLR(opt, lr_lambda)
-    scaler = torch.amp.GradScaler('cuda', enabled=(device.type == "cuda"))
+    use_amp = device.type == "cuda"
+    scaler = torch.amp.GradScaler(device.type, enabled=use_amp)
     ce_loss = nn.CrossEntropyLoss(label_smoothing=cfg.label_smoothing)
 
     if save_dir:
@@ -644,7 +645,7 @@ def train_and_eval(
                 X = build_attn_tensor(att_list, layer_idx, cfg.attn_size, True).to(device, non_blocking=True)
                 S = attn_stats_21(att_list, layer_idx).to(device, non_blocking=True)
 
-                with nvtx_range("forward", enabled=(device.type == "cuda")), torch.autocast(device_type="cuda", dtype=torch.float16, enabled=(device.type == "cuda")):
+                with nvtx_range("forward", enabled=(device.type == "cuda")), torch.autocast(device_type=device.type, dtype=torch.float16, enabled=use_amp):
                     logits = model(X, cls_vec, S)
                     loss = ce_loss(logits, y)
 
