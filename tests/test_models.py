@@ -87,6 +87,12 @@ class TestConvBlock:
         out = block(x)
         assert out.shape == (2, 16, 8, 8)
 
+    def test_depthwise_separable(self):
+        block = ConvBlock(in_c=16, out_c=32, depthwise_sep=True)
+        x = torch.randn(2, 16, 8, 8)
+        out = block(x)
+        assert out.shape == (2, 32, 8, 8)
+
     def test_gradient_flow(self):
         block = ConvBlock(in_c=4, out_c=8)
         x = torch.randn(2, 4, 8, 8, requires_grad=True)

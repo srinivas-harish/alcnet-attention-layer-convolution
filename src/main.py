@@ -321,9 +321,16 @@ class SEBlock(nn.Module):
 
 
 class ConvBlock(nn.Module):
-    def __init__(self, in_c, out_c, k=3, s=1, p=1, drop=0.0):
+    def __init__(self, in_c, out_c, k=3, s=1, p=1, drop=0.0, depthwise_sep=False):
         super().__init__()
-        self.conv = nn.Conv2d(in_c, out_c, k, s, p, bias=False)
+        if depthwise_sep and in_c != out_c:
+            # Depthwise separable: depthwise conv + pointwise 1x1
+            self.conv = nn.Sequential(
+                nn.Conv2d(in_c, in_c, k, s, p, groups=in_c, bias=False),
+                nn.Conv2d(in_c, out_c, 1, bias=False),
+            )
+        else:
+            self.conv = nn.Conv2d(in_c, out_c, k, s, p, bias=False)
         self.bn = nn.BatchNorm2d(out_c)
         self.act = nn.GELU()
         self.dp = nn.Dropout2d(drop) if drop > 0 else nn.Identity()
