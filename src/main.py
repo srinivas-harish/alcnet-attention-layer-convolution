@@ -206,9 +206,20 @@ def attn_stats_21(att_list: list[torch.Tensor], layers: list[int], k: int = 5) -
     return _nan_to_num(out)
 
 
-def build_attn_tensor(attn_list: list[torch.Tensor], layer_idx: list[int], resize_to: int, channel_norm: bool = True) -> torch.Tensor:
+def build_attn_tensor(
+    attn_list: list[torch.Tensor],
+    layer_idx: list[int],
+    resize_to: int,
+    channel_norm: bool = True,
+    training: bool = False,
+    attn_drop: float = 0.0,
+) -> torch.Tensor:
     x = torch.cat([attn_list[i] for i in layer_idx], dim=1)  # (B, C, S, S)
     x = torch.nan_to_num(x, nan=0.0, posinf=1e4, neginf=-1e4)
+    # Attention map augmentation: randomly zero elements during training
+    if training and attn_drop > 0:
+        mask = torch.rand_like(x) > attn_drop
+        x = x * mask
     if channel_norm:
         eps = 1e-5
         mean = x.mean(dim=(2, 3), keepdim=True)
@@ -506,6 +517,7 @@ class AlcnetCfg:
     ema_decay: float = 0.0  # EMA of model weights; >0 enables (e.g. 0.999)
     ablation: str | None = None  # "no_cnn" | "no_stats" | "no_film" | None
     hidden_dropout: float | None = None  # override encoder hidden/attention dropout
+    attn_drop: float = 0.0  # attention map augmentation dropout rate
 
 
 def parse_layers(sel: tuple[int, ...], n_layers: int) -> list[int]:
@@ -680,7 +692,7 @@ def train_and_eval(
                 msk = batch["attention_mask"].to(device, non_blocking=True)
 
                 att_list, cls_vec = encoder(input_ids=ids, attention_mask=msk)
-                X = build_attn_tensor(att_list, layer_idx, cfg.attn_size, True).to(device, non_blocking=True)
+                X = build_attn_tensor(att_list, layer_idx, cfg.attn_size, True, training=True, attn_drop=cfg.attn_drop).to(device, non_blocking=True)
                 S = attn_stats_21(att_list, layer_idx).to(device, non_blocking=True)
 
                 with nvtx_range("forward", enabled=(device.type == "cuda")), torch.autocast(device_type=device.type, dtype=torch.float16, enabled=use_amp):
