@@ -770,7 +770,8 @@ def train_and_eval(
             "val_acc": float(val_acc),
             "val_f1_macro": float(val_f1),
             "val_loss": float(val_loss),
-            "lr": float(opt.param_groups[0]["lr"]),
+            "lr_encoder": float(opt.param_groups[0]["lr"]),
+            "lr_head": float(opt.param_groups[1]["lr"]) if len(opt.param_groups) > 1 else None,
             "gate_mean": gate_mean,
         }
         logs.append(ep_row)
