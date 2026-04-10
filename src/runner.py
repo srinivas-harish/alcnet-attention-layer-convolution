@@ -9,7 +9,7 @@ from .main import AlcnetCfg, pick_device, train_and_eval
 
 logger = logging.getLogger(__name__)
 
-# Whitelist of config fields that can be set via API overrides
+# Allowed config fields for API overrides
 _ALLOWED_OVERRIDE_KEYS = frozenset(f.name for f in dataclass_fields(AlcnetCfg))
 
 
@@ -44,17 +44,6 @@ def run_from_req(req: dict[str, Any], *, run_id: str | None = None, save_dir: st
     eff_save_dir = save_dir or req.get("save_dir")
     if eff_save_dir:
         os.makedirs(eff_save_dir, exist_ok=True)
-
-    # Ensure at least one CUDA op runs to get profiling warmed up
-    try:
-        import torch
-        if device.type == "cuda" and torch.cuda.is_available():
-            _a = torch.randn(32, 32, device="cuda")
-            _b = torch.randn(32, 32, device="cuda")
-            _ = _a @ _b
-            torch.cuda.synchronize()
-    except Exception:
-        pass
 
     result = train_and_eval(
         task_ctx=None,

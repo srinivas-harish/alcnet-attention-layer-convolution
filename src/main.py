@@ -1,9 +1,4 @@
-"""
-alcnet-attention-layer-convolution | Training core
-
-This module implements the core training loop for the hybrid model with a structure that can be orchestrated
-by FastAPI + Celery + Redis and extended with NVTX/Nsight profiling later. The code includes an NVTX helper.
-"""
+"""ALCNet — hybrid attention-layer CNN for NLU."""
 
 from __future__ import annotations
 
@@ -80,7 +75,6 @@ class nvtx_range:
 
 # ---------------- Data ----------------
 class RTEDataset(Dataset):
-    """Pre-tokenized RTE dataset. Tokenization happens once at init, not per __getitem__."""
 
     def __init__(self, df, tokenizer, max_len: int):
         premises = list(df["sentence1"])
@@ -240,15 +234,7 @@ def build_attn_tensor(
 
 # ---------------- FiLM Conditioning Layer ----------------
 class FiLMGenerator(nn.Module):
-    """Generate FiLM (gamma, beta) parameters from a conditioning vector.
-
-    Given a conditioning input of shape (B, cond_dim), produces
-    gamma and beta of shape (B, n_channels) for feature-wise affine
-    transformation: out = gamma * features + beta.
-
-    Reference: Perez et al., "FiLM: Visual Reasoning with a General
-    Conditioning Layer", AAAI 2018.
-    """
+    """Produces per-channel (gamma, beta) from a conditioning vector."""
 
     def __init__(self, cond_dim: int, n_channels: int):
         super().__init__()
@@ -265,11 +251,6 @@ class FiLMGenerator(nn.Module):
 
 
 def apply_film(features: torch.Tensor, gamma: torch.Tensor, beta: torch.Tensor) -> torch.Tensor:
-    """Apply FiLM conditioning: gamma * features + beta.
-
-    features: (B, C, H, W) or (B, C)
-    gamma, beta: (B, C)
-    """
     if features.dim() == 4:
         gamma = gamma[:, :, None, None]
         beta = beta[:, :, None, None]
@@ -278,11 +259,7 @@ def apply_film(features: torch.Tensor, gamma: torch.Tensor, beta: torch.Tensor) 
 
 # ---------------- Model ----------------
 class DropPath(nn.Module):
-    """Stochastic Depth per sample (Huang et al., 2016).
-
-    During training, randomly drops the entire residual branch with probability
-    `drop_prob`. At eval, acts as identity.
-    """
+    """Per-sample stochastic depth — drops residual branch with given probability."""
 
     def __init__(self, drop_prob: float = 0.0):
         super().__init__()
@@ -298,10 +275,7 @@ class DropPath(nn.Module):
 
 
 class SEBlock(nn.Module):
-    """Squeeze-and-Excitation block for channel attention.
-
-    Reference: Hu et al., "Squeeze-and-Excitation Networks", CVPR 2018.
-    """
+    """Squeeze-and-excitation channel attention."""
 
     def __init__(self, channels: int, reduction: int = 4):
         super().__init__()
@@ -368,10 +342,6 @@ class AttnCNN(nn.Module):
         self.fc = nn.Linear(256, out_dim)
 
     def forward(self, x, film_params=None):
-        """Forward pass with optional FiLM conditioning.
-
-        film_params: dict with 'gamma1','beta1','gamma2','beta2' or None
-        """
         x = self.adapter(x)
         g1, b1 = (film_params["gamma1"], film_params["beta1"]) if film_params else (None, None)
         g2, b2 = (film_params["gamma2"], film_params["beta2"]) if film_params else (None, None)
@@ -393,7 +363,6 @@ class MLP(nn.Module):
             nn.GELU(),
             nn.Dropout(0.1),
             nn.Linear(hidden, out_dim),
-            nn.GELU(),
         )
 
     def forward(self, x):
@@ -401,11 +370,6 @@ class MLP(nn.Module):
 
 
 class ModelEMA:
-    """Exponential moving average of model parameters.
-
-    Maintains a shadow copy of model weights: shadow = decay * shadow + (1-decay) * param.
-    Use context manager for evaluation with EMA weights.
-    """
 
     def __init__(self, model: nn.Module, decay: float = 0.999):
         self.decay = decay
@@ -419,7 +383,6 @@ class ModelEMA:
 
     @contextlib.contextmanager
     def apply(self):
-        """Context manager: temporarily swap in EMA weights for eval."""
         original = {k: v.clone() for k, v in self.model.state_dict().items()}
         self.model.load_state_dict(self.shadow)
         try:
@@ -429,13 +392,12 @@ class ModelEMA:
 
 
 def _init_weights(m: nn.Module) -> None:
-    """Kaiming init for conv/linear with GELU, Xavier for classification heads."""
     if isinstance(m, nn.Conv2d):
-        nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="linear")
+        nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
         if m.bias is not None:
             nn.init.zeros_(m.bias)
     elif isinstance(m, nn.Linear):
-        nn.init.kaiming_normal_(m.weight, mode="fan_in", nonlinearity="linear")
+        nn.init.kaiming_normal_(m.weight, mode="fan_in", nonlinearity="relu")
         if m.bias is not None:
             nn.init.zeros_(m.bias)
     elif isinstance(m, (nn.BatchNorm2d, nn.LayerNorm)):
@@ -510,7 +472,7 @@ class AlcnetCfg:
     lr_encoder: float = 8e-6
     weight_decay: float = 1e-4
     label_smoothing: float = 0.05
-    rdrop_alpha: float = 0.0  # R-Drop KL weight; >0 enables R-Drop (Liang et al., 2021)
+    rdrop_alpha: float = 0.0  # R-Drop KL weight; >0 enables symmetric KL reg
     grad_clip: float = 1.0
     grad_accumulation_steps: int = 1
     attn_layers: tuple[int, int, int] = (-3, -2, -1)
@@ -596,8 +558,8 @@ def evaluate(encoder, model, dl, device, layer_idx, attn_size, max_batches=None,
         attention_mask = batch["attention_mask"].to(device, non_blocking=True)
 
         att_list, cls_vec = encoder(input_ids=input_ids, attention_mask=attention_mask)
-        X = build_attn_tensor(att_list, layer_idx, attn_size, True).to(device, non_blocking=True)
-        S = attn_stats_21(att_list, layer_idx).to(device, non_blocking=True)
+        X = build_attn_tensor(att_list, layer_idx, attn_size, True)
+        S = attn_stats_21(att_list, layer_idx)
 
         with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=(device.type == "cuda")):
             logits = model(X, cls_vec, S, ablation=ablation)
@@ -612,7 +574,7 @@ def evaluate(encoder, model, dl, device, layer_idx, attn_size, max_batches=None,
     gts = torch.cat(gts).numpy()
     total = len(gts)
     val_loss = sum(losses) / max(1, total)
-    return float(accuracy_score(gts, preds)), float(f1_score(gts, preds)), float(val_loss)
+    return float(accuracy_score(gts, preds)), float(f1_score(gts, preds, average="macro")), float(val_loss)
 
 
 def train_and_eval(
@@ -643,7 +605,8 @@ def train_and_eval(
         in_ch = n_heads * len(layer_idx)
         cls_dim = int(cls_probe.shape[1])
 
-    model = GatedHybridClassifier(attn_in_ch=in_ch, cls_dim=cls_dim, stats_dim=21, num_classes=2).to(device)
+    stats_dim = 6 * len(layer_idx) + 3
+    model = GatedHybridClassifier(attn_in_ch=in_ch, cls_dim=cls_dim, stats_dim=stats_dim, num_classes=2).to(device)
 
     if cfg.compile_model and hasattr(torch, "compile"):
         logger.info("Compiling model with torch.compile()")
@@ -678,8 +641,7 @@ def train_and_eval(
             return float(current_step) / float(max(1, warmup_steps))
         t = current_step - warmup_steps
         if cfg.lr_schedule == "cosine_restarts":
-            # Cosine with warm restarts (SGDR, Loshchilov & Hutter 2017)
-            # Restart period = steps_per_epoch
+            # Restart period = 1 epoch
             steps_per_epoch = max(1, math.ceil(len(train_dl)))
             cycle_pos = t % steps_per_epoch
             return max(0.0, 0.5 * (1.0 + math.cos(math.pi * cycle_pos / steps_per_epoch)))
@@ -700,8 +662,8 @@ def train_and_eval(
     patience_counter = 0
 
     for ep in range(1, cfg.epochs + 1):
-        # Anneal label smoothing: start at 2x, decay to target over training
-        ep_smoothing = cfg.label_smoothing * (1.0 + (cfg.epochs - ep) / max(1, cfg.epochs))
+        # Anneal label smoothing: 2x at epoch 1, decays to 1x at final epoch
+        ep_smoothing = cfg.label_smoothing * (2.0 - (ep - 1) / max(1, cfg.epochs - 1))
         ce_loss = nn.CrossEntropyLoss(label_smoothing=min(0.5, ep_smoothing))
 
         # Freeze/unfreeze encoder on schedule
@@ -728,8 +690,8 @@ def train_and_eval(
                 msk = batch["attention_mask"].to(device, non_blocking=True)
 
                 att_list, cls_vec = encoder(input_ids=ids, attention_mask=msk)
-                X = build_attn_tensor(att_list, layer_idx, cfg.attn_size, True, training=True, attn_drop=cfg.attn_drop).to(device, non_blocking=True)
-                S = attn_stats_21(att_list, layer_idx).to(device, non_blocking=True)
+                X = build_attn_tensor(att_list, layer_idx, cfg.attn_size, True, training=True, attn_drop=cfg.attn_drop)
+                S = attn_stats_21(att_list, layer_idx)
 
                 with nvtx_range("forward", enabled=(device.type == "cuda")), torch.autocast(device_type=device.type, dtype=torch.float16, enabled=use_amp):
                     logits = model(X, cls_vec, S, ablation=cfg.ablation)
@@ -742,11 +704,12 @@ def train_and_eval(
                         p = F.log_softmax(logits, dim=-1)
                         q = F.log_softmax(logits2, dim=-1)
                         kl = 0.5 * (
-                            F.kl_div(p, q.exp(), reduction="batchmean")
-                            + F.kl_div(q, p.exp(), reduction="batchmean")
+                            F.kl_div(p, q, reduction="batchmean", log_target=True)
+                            + F.kl_div(q, p, reduction="batchmean", log_target=True)
                         )
                         loss = 0.5 * (loss + loss2) + cfg.rdrop_alpha * kl
 
+                    loss_for_log = loss.detach()
                     if cfg.grad_accumulation_steps > 1:
                         loss = loss / cfg.grad_accumulation_steps
 
@@ -760,15 +723,12 @@ def train_and_eval(
                 is_accumulation_step = (bi + 1) % cfg.grad_accumulation_steps == 0 or (bi + 1) == len(train_dl)
                 if is_accumulation_step:
                     scaler.unscale_(opt)
-                    # Capture pre-clip grad norm for diagnostics
-                    total_norm = torch.nn.utils.clip_grad_norm_(
-                        list(model.parameters()) + enc_params, float("inf")
-                    )
+                    all_params = list(model.parameters()) + enc_params
+                    # Log pre-clip norm, then clip jointly
+                    total_norm = torch.nn.utils.clip_grad_norm_(all_params, float("inf"))
                     grad_norms.append(float(total_norm.item()))
                     if cfg.grad_clip and cfg.grad_clip > 0:
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip)
-                        if enc_params:
-                            torch.nn.utils.clip_grad_norm_(enc_params, cfg.grad_clip)
+                        torch.nn.utils.clip_grad_norm_(all_params, cfg.grad_clip)
                     with nvtx_range("step", enabled=(device.type == "cuda")):
                         scaler.step(opt)
                         scaler.update()
@@ -784,7 +744,7 @@ def train_and_eval(
                     total = y.numel()
                     run_correct += correct
                     run_total += total
-                    run_loss += float(loss.item()) * total
+                    run_loss += float(loss_for_log.item()) * total
                     # Collect gate stats if available
                     _model = model._orig_mod if hasattr(model, "_orig_mod") else model
                     if hasattr(_model, "last_gate") and _model.last_gate is not None:
@@ -808,7 +768,7 @@ def train_and_eval(
             "epoch": ep,
             "time_sec": round(time.time() - start, 2),
             "train_acc": float(run_correct / max(1, run_total)),
-            "train_loss_ema": float(run_loss / max(1, run_total)),
+            "train_loss": float(run_loss / max(1, run_total)),
             "val_acc": float(val_acc),
             "val_f1_macro": float(val_f1),
             "val_loss": float(val_loss),
