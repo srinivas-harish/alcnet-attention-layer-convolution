@@ -682,7 +682,6 @@ def train_and_eval(
     sched = torch.optim.lr_scheduler.LambdaLR(opt, lr_lambda)
     use_amp = device.type == "cuda"
     scaler = torch.amp.GradScaler(device.type, enabled=use_amp)
-    ce_loss = nn.CrossEntropyLoss(label_smoothing=cfg.label_smoothing)
 
     if save_dir:
         os.makedirs(save_dir, exist_ok=True)
@@ -693,6 +692,10 @@ def train_and_eval(
     patience_counter = 0
 
     for ep in range(1, cfg.epochs + 1):
+        # Anneal label smoothing: start at 2x, decay to target over training
+        ep_smoothing = cfg.label_smoothing * (1.0 + (cfg.epochs - ep) / max(1, cfg.epochs))
+        ce_loss = nn.CrossEntropyLoss(label_smoothing=min(0.5, ep_smoothing))
+
         encoder.train()
         model.train()
         start = time.time()
