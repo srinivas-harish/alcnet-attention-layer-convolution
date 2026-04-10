@@ -119,7 +119,7 @@ def collate(batch):
 
 # ---------------- Encoder and attention utilities ----------------
 class EncoderWrapper(nn.Module):
-    def __init__(self, model_name: str, gradient_checkpointing: bool = False, hidden_dropout: float | None = None):
+    def __init__(self, model_name: str, gradient_checkpointing: bool = False, hidden_dropout: float | None = None, cls_pool_layers: int = 4):
         super().__init__()
         kwargs: dict[str, Any] = {
             "output_attentions": True,
@@ -133,10 +133,18 @@ class EncoderWrapper(nn.Module):
         if gradient_checkpointing and hasattr(self.encoder, "gradient_checkpointing_enable"):
             with contextlib.suppress(Exception):
                 self.encoder.gradient_checkpointing_enable()
+        # Learnable weights for pooling CLS across last N hidden layers
+        self.cls_pool_layers = cls_pool_layers
+        self.layer_weights = nn.Parameter(torch.ones(cls_pool_layers))
 
     def forward(self, **enc):
         out = self.encoder(**enc)
-        cls = out.last_hidden_state[:, 0]
+        # Weighted average of CLS tokens from last N hidden layers
+        hidden_states = out.hidden_states  # tuple of (B, S, D), length = n_layers + 1
+        pool_states = hidden_states[-self.cls_pool_layers:]
+        cls_stack = torch.stack([h[:, 0] for h in pool_states], dim=0)  # (N, B, D)
+        weights = F.softmax(self.layer_weights, dim=0).unsqueeze(-1).unsqueeze(-1)  # (N, 1, 1)
+        cls = (cls_stack * weights).sum(dim=0)  # (B, D)
         return out.attentions, cls
 
 
