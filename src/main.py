@@ -646,6 +646,14 @@ def train_and_eval(
     enc_params = list(encoder.parameters())
     head_params = list(model.parameters())
 
+    enc_param_count = sum(p.numel() for p in enc_params)
+    head_param_count = sum(p.numel() for p in head_params)
+    trainable_params = sum(p.numel() for p in enc_params if p.requires_grad) + sum(p.numel() for p in head_params if p.requires_grad)
+    logger.info(
+        "Parameters: encoder=%s head=%s trainable=%s",
+        f"{enc_param_count:,}", f"{head_param_count:,}", f"{trainable_params:,}",
+    )
+
     opt = torch.optim.AdamW(
         [
             {"params": enc_params, "lr": cfg.lr_encoder, "weight_decay": cfg.weight_decay},
@@ -830,6 +838,11 @@ def train_and_eval(
         "best": best,
         "epochs": logs,
         "save_dir": save_dir if save_dir else None,
+        "params": {
+            "encoder": enc_param_count,
+            "head": head_param_count,
+            "trainable": trainable_params,
+        },
     }
 
 
