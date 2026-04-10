@@ -464,6 +464,7 @@ class GatedHybridClassifier(nn.Module):
         combined = torch.cat([cnn_feat, stats_feat], dim=1)
         cnn_logits = self.cnn_head(combined)
         conf = torch.sigmoid(self.conf_head(combined))
+        self.last_gate = conf.detach()  # for logging
         logits = (1 - conf) * vanilla_logits + conf * cnn_logits
         return logits
 
@@ -666,6 +667,7 @@ def train_and_eval(
         run_loss = 0.0
         run_correct = 0
         run_total = 0
+        gate_vals: list[float] = []
         with nvtx_range(f"epoch_{ep}", enabled=(device.type == "cuda")):
             pbar = tqdm(train_dl, total=len(train_dl), desc=f"Epoch {ep}/{cfg.epochs}", dynamic_ncols=True, leave=False)
             for bi, batch in enumerate(pbar):
@@ -726,6 +728,10 @@ def train_and_eval(
                     run_correct += correct
                     run_total += total
                     run_loss += float(loss.item()) * total
+                    # Collect gate stats if available
+                    _model = model._orig_mod if hasattr(model, "_orig_mod") else model
+                    if hasattr(_model, "last_gate") and _model.last_gate is not None:
+                        gate_vals.append(float(_model.last_gate.mean().item()))
                     pbar.set_postfix_str(
                         f"loss={run_loss/max(1,run_total):.4f} | acc={100.0*run_correct/max(1,run_total):.2f}%"
                     )
@@ -739,6 +745,7 @@ def train_and_eval(
                 max_batches=cfg.max_val_batches, ablation=cfg.ablation,
             )
 
+        gate_mean = float(np.mean(gate_vals)) if gate_vals else None
         ep_row = {
             "epoch": ep,
             "time_sec": round(time.time() - start, 2),
@@ -748,6 +755,7 @@ def train_and_eval(
             "val_f1_macro": float(val_f1),
             "val_loss": float(val_loss),
             "lr": float(opt.param_groups[0]["lr"]),
+            "gate_mean": gate_mean,
         }
         logs.append(ep_row)
         if progress_path:
