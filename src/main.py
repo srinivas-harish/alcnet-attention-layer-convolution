@@ -333,7 +333,9 @@ class AttnCNN(nn.Module):
         self.se2 = SEBlock(256)
         self.shortcut2 = nn.Conv2d(128, 256, kernel_size=1, bias=False)
         self.drop_path2 = DropPath(drop_path)
-        self.gap = nn.AdaptiveAvgPool2d(1)
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.max_pool = nn.AdaptiveMaxPool2d(1)
+        self.pool_gate = nn.Parameter(torch.tensor(0.5))  # learnable avg/max blend
         self.fc = nn.Linear(256, out_dim)
 
     def forward(self, x, film_params=None):
@@ -347,7 +349,8 @@ class AttnCNN(nn.Module):
         x = self.drop_path1(self.se1(self.conv1(x, g1, b1))) + self.shortcut1(x)
         x = self.pool(x)
         x = self.drop_path2(self.se2(self.conv2(x, g2, b2))) + self.shortcut2(x)
-        x = self.gap(x).flatten(1)
+        g = torch.sigmoid(self.pool_gate)
+        x = (g * self.avg_pool(x) + (1 - g) * self.max_pool(x)).flatten(1)
         return self.fc(x)
 
 
