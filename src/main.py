@@ -834,6 +834,11 @@ def train_and_eval(
                         {
                             "encoder": encoder.state_dict(),
                             "model": model.state_dict(),
+                            "optimizer": opt.state_dict(),
+                            "scheduler": sched.state_dict(),
+                            "scaler": scaler.state_dict(),
+                            "epoch": ep,
+                            "best": best,
                             "attn_layers": layer_idx,
                             "attn_size": cfg.attn_size,
                             "in_ch": in_ch,
