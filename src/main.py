@@ -491,6 +491,7 @@ class AlcnetCfg:
     max_val_batches: int | None = None
     # schedule
     warmup_ratio: float = 0.06  # fraction of total steps for LR warmup
+    lr_schedule: str = "cosine"  # "cosine" | "cosine_restarts"
     early_stopping_patience: int = 0  # 0 = disabled; N > 0 = stop after N epochs without improvement
     # toggles
     gradient_checkpointing: bool = True
@@ -621,10 +622,20 @@ def train_and_eval(
     total_steps = max(1, math.ceil(len(train_dl)) * cfg.epochs)
     warmup_steps = max(1, int(total_steps * cfg.warmup_ratio))
 
+    post_warmup = max(1, total_steps - warmup_steps)
+
     def lr_lambda(current_step: int) -> float:
         if current_step < warmup_steps:
             return float(current_step) / float(max(1, warmup_steps))
-        progress = float(current_step - warmup_steps) / float(max(1, total_steps - warmup_steps))
+        t = current_step - warmup_steps
+        if cfg.lr_schedule == "cosine_restarts":
+            # Cosine with warm restarts (SGDR, Loshchilov & Hutter 2017)
+            # Restart period = steps_per_epoch
+            steps_per_epoch = max(1, math.ceil(len(train_dl)))
+            cycle_pos = t % steps_per_epoch
+            return max(0.0, 0.5 * (1.0 + math.cos(math.pi * cycle_pos / steps_per_epoch)))
+        # Default: single cosine decay
+        progress = float(t) / float(post_warmup)
         return max(0.0, 0.5 * (1.0 + math.cos(math.pi * progress)))
 
     sched = torch.optim.lr_scheduler.LambdaLR(opt, lr_lambda)
