@@ -523,6 +523,7 @@ class AlcnetCfg:
     gradient_checkpointing: bool = True
     compile_model: bool = False  # torch.compile() — requires PyTorch 2.0+
     ema_decay: float = 0.0  # EMA of model weights; >0 enables (e.g. 0.999)
+    freeze_encoder_epochs: int = 0  # freeze encoder for N epochs, then unfreeze
     ablation: str | None = None  # "no_cnn" | "no_stats" | "no_film" | None
     hidden_dropout: float | None = None  # override encoder hidden/attention dropout
     attn_drop: float = 0.0  # attention map augmentation dropout rate
@@ -695,6 +696,14 @@ def train_and_eval(
         # Anneal label smoothing: start at 2x, decay to target over training
         ep_smoothing = cfg.label_smoothing * (1.0 + (cfg.epochs - ep) / max(1, cfg.epochs))
         ce_loss = nn.CrossEntropyLoss(label_smoothing=min(0.5, ep_smoothing))
+
+        # Freeze/unfreeze encoder on schedule
+        if cfg.freeze_encoder_epochs > 0:
+            should_freeze = ep <= cfg.freeze_encoder_epochs
+            for p in encoder.parameters():
+                p.requires_grad = not should_freeze
+            if ep == cfg.freeze_encoder_epochs + 1:
+                logger.info("Unfreezing encoder at epoch %d", ep)
 
         encoder.train()
         model.train()
