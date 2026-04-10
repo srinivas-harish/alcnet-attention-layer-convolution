@@ -55,7 +55,18 @@ class RunRequest(BaseModel):
 
 @app.get("/")
 def root():
-    return {"ok": True, "msg": "alcnet service ready", "endpoints": ["/runs (POST)", "/runs (GET)", "/runs/{run_id} (GET)"]}
+    return {"ok": True, "msg": "alcnet service ready", "endpoints": ["/runs (POST)", "/runs (GET)", "/runs/{run_id} (GET)", "/health (GET)"]}
+
+
+@app.get("/health")
+def health():
+    import torch
+    return {
+        "ok": True,
+        "cuda_available": torch.cuda.is_available(),
+        "cuda_device": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
+        "torch_version": torch.__version__,
+    }
 
 
 @app.post("/runs")

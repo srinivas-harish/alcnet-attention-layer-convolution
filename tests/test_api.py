@@ -66,6 +66,16 @@ class TestRootEndpoint:
         assert "endpoints" in data
 
 
+class TestHealthEndpoint:
+    def test_health_returns_ok(self, client):
+        resp = client.get("/health")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert "torch_version" in data
+        assert "cuda_available" in data
+
+
 class TestSubmitRun:
     def test_submit_minimal_run(self, client):
         resp = client.post("/runs", json={})
