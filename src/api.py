@@ -1,5 +1,5 @@
 import os
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -42,11 +42,11 @@ init_db()
 
 
 class RunRequest(BaseModel):
-    ablation: str | None = None
+    ablation: Literal["no_cnn", "no_stats", "no_film"] | None = None
     overrides: dict[str, Any] = Field(default_factory=dict)
-    epochs: int = 3
-    batch_size: int = 8
-    max_len: int = 128
+    epochs: int = Field(3, ge=1, le=100)
+    batch_size: int = Field(8, ge=1, le=256)
+    max_len: int = Field(128, ge=16, le=512)
     save_dir: str | None = None
     save_artifacts: bool = False
     gradient_checkpointing: bool = True

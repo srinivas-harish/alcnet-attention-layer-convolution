@@ -86,6 +86,14 @@ class TestSubmitRun:
         data = resp.json()
         assert "run_id" in data
 
+    def test_submit_invalid_ablation(self, client):
+        resp = client.post("/runs", json={"ablation": "invalid_mode"})
+        assert resp.status_code == 422
+
+    def test_submit_invalid_epochs(self, client):
+        resp = client.post("/runs", json={"epochs": 0})
+        assert resp.status_code == 422
+
     def test_submit_run_returns_unique_ids(self, client):
         resp1 = client.post("/runs", json={})
         resp2 = client.post("/runs", json={})
