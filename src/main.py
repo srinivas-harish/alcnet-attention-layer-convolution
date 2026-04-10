@@ -551,10 +551,12 @@ def build_loaders(cfg: AlcnetCfg, device: torch.device, dataloader_workers: int 
 
 
 @torch.no_grad()
-def evaluate(encoder, model, dl, device, layer_idx, attn_size, max_batches=None, ablation: str | None = None) -> tuple[float, float]:
+def evaluate(encoder, model, dl, device, layer_idx, attn_size, max_batches=None, ablation: str | None = None) -> tuple[float, float, float]:
+    """Returns (accuracy, f1_macro, val_loss)."""
     encoder.eval()
     model.eval()
-    preds, gts = [], []
+    ce = nn.CrossEntropyLoss()
+    preds, gts, losses = [], [], []
     for bi, batch in enumerate(dl):
         y = batch["label"].to(device, non_blocking=True)
         input_ids = batch["input_ids"].to(device, non_blocking=True)
@@ -566,6 +568,7 @@ def evaluate(encoder, model, dl, device, layer_idx, attn_size, max_batches=None,
 
         with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=(device.type == "cuda")):
             logits = model(X, cls_vec, S, ablation=ablation)
+        losses.append(ce(logits.float(), y).item() * y.numel())
         p = logits.argmax(dim=1)
         preds.append(p.cpu())
         gts.append(y.cpu())
@@ -574,7 +577,9 @@ def evaluate(encoder, model, dl, device, layer_idx, attn_size, max_batches=None,
 
     preds = torch.cat(preds).numpy()
     gts = torch.cat(gts).numpy()
-    return float(accuracy_score(gts, preds)), float(f1_score(gts, preds))
+    total = len(gts)
+    val_loss = sum(losses) / max(1, total)
+    return float(accuracy_score(gts, preds)), float(f1_score(gts, preds)), float(val_loss)
 
 
 def train_and_eval(
@@ -729,7 +734,7 @@ def train_and_eval(
 
         ema_ctx = ema.apply() if ema is not None else contextlib.nullcontext()
         with ema_ctx:
-            val_acc, val_f1 = evaluate(
+            val_acc, val_f1, val_loss = evaluate(
                 encoder, model, val_dl, device, layer_idx, cfg.attn_size,
                 max_batches=cfg.max_val_batches, ablation=cfg.ablation,
             )
@@ -741,6 +746,7 @@ def train_and_eval(
             "train_loss_ema": float(run_loss / max(1, run_total)),
             "val_acc": float(val_acc),
             "val_f1_macro": float(val_f1),
+            "val_loss": float(val_loss),
             "lr": float(opt.param_groups[0]["lr"]),
         }
         logs.append(ep_row)
