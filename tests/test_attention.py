@@ -1,4 +1,4 @@
-"""Tests for attention processing utilities: attn_stats_21, build_attn_tensor, mask functions."""
+"""Attention utility tests."""
 
 import torch
 

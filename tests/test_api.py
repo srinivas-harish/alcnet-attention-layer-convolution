@@ -1,4 +1,4 @@
-"""Tests for the FastAPI application endpoints."""
+"""API endpoint tests."""
 
 from unittest.mock import MagicMock, patch
 

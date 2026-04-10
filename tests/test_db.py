@@ -1,4 +1,4 @@
-"""Tests for database models and helpers using in-memory SQLite."""
+"""DB model and helper tests."""
 
 import pytest
 from sqlalchemy import create_engine

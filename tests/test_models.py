@@ -1,4 +1,4 @@
-"""Tests for model components: SEBlock, ConvBlock, AttnCNN, MLP, GatedHybridClassifier."""
+"""Model component tests."""
 
 import pytest
 import torch

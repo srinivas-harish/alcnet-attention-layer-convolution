@@ -1,4 +1,4 @@
-"""Tests for configuration, data helpers, and runner utilities."""
+"""Config and runner tests."""
 
 
 from src.main import AlcnetCfg, effective_num_workers, parse_layers, pick_device

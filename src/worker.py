@@ -22,10 +22,6 @@ init_db()
 
 @celery_app.task(name="worker.run_train_task", bind=True)
 def run_train_task(self, run_id: str, req: dict):
-    """
-    Background training task. Expects the exact POST body from the API.
-    Writes per-epoch progress into DB and registers artifacts.
-    """
     try:
         # Helper to update DB with retry (SQLite can be briefly locked)
         def db_retry(op, *a, **kw):

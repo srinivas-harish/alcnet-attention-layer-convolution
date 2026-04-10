@@ -66,7 +66,7 @@ class EpochMetric(Base):
 
     time_sec = Column(Float)
     train_acc = Column(Float)
-    train_loss_ema = Column(Float)
+    train_loss = Column(Float)
     val_acc = Column(Float)
     val_f1_macro = Column(Float)
     lr = Column(Float)
@@ -158,7 +158,7 @@ def append_epoch(s, run_id: str, e: dict[str, Any]) -> None:
         epoch=int(e.get("epoch")),
         time_sec=e.get("time_sec"),
         train_acc=e.get("train_acc"),
-        train_loss_ema=e.get("train_loss_ema"),
+        train_loss=e.get("train_loss"),
         val_acc=e.get("val_acc"),
         val_f1_macro=e.get("val_f1_macro"),
         lr=e.get("lr"),
@@ -215,7 +215,7 @@ def serialize_run(run: Run, with_children: bool = False) -> dict[str, Any]:
                 "epoch": e.epoch,
                 "time_sec": e.time_sec,
                 "train_acc": e.train_acc,
-                "train_loss_ema": e.train_loss_ema,
+                "train_loss": e.train_loss,
                 "val_acc": e.val_acc,
                 "val_f1_macro": e.val_f1_macro,
                 "lr": e.lr,

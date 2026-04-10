@@ -1,4 +1,4 @@
-"""Tests for FiLM conditioning layer and its integration with the model."""
+"""FiLM conditioning tests."""
 
 import torch
 

@@ -1,4 +1,4 @@
-"""Shared test fixtures for ALCNet tests."""
+"""Shared fixtures."""
 
 import pytest
 import torch
@@ -6,7 +6,6 @@ import torch
 
 @pytest.fixture
 def device():
-    """Use CPU for all tests (no GPU required)."""
     return torch.device("cpu")
 
 
@@ -32,11 +31,6 @@ def n_layers():
 
 @pytest.fixture
 def fake_attention(batch_size, n_heads, seq_len, n_layers):
-    """Generate fake attention tensors simulating transformer output.
-
-    Returns a list of (B, H, S, S) tensors, one per layer.
-    Values are softmax-normalized along the last dim to mimic real attention.
-    """
     att_list = []
     for _ in range(n_layers):
         raw = torch.randn(batch_size, n_heads, seq_len, seq_len)

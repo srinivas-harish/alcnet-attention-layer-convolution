@@ -1,4 +1,4 @@
-"""Tests for the runner module — request parsing and config building."""
+"""Runner tests."""
 
 from unittest.mock import patch
 
