@@ -684,6 +684,7 @@ def train_and_eval(
         run_correct = 0
         run_total = 0
         gate_vals: list[float] = []
+        grad_norms: list[float] = []
         with nvtx_range(f"epoch_{ep}", enabled=(device.type == "cuda")):
             pbar = tqdm(train_dl, total=len(train_dl), desc=f"Epoch {ep}/{cfg.epochs}", dynamic_ncols=True, leave=False)
             for bi, batch in enumerate(pbar):
@@ -724,6 +725,11 @@ def train_and_eval(
                 is_accumulation_step = (bi + 1) % cfg.grad_accumulation_steps == 0 or (bi + 1) == len(train_dl)
                 if is_accumulation_step:
                     scaler.unscale_(opt)
+                    # Capture pre-clip grad norm for diagnostics
+                    total_norm = torch.nn.utils.clip_grad_norm_(
+                        list(model.parameters()) + enc_params, float("inf")
+                    )
+                    grad_norms.append(float(total_norm.item()))
                     if cfg.grad_clip and cfg.grad_clip > 0:
                         torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip)
                         if enc_params:
@@ -762,6 +768,7 @@ def train_and_eval(
             )
 
         gate_mean = float(np.mean(gate_vals)) if gate_vals else None
+        grad_norm_mean = float(np.mean(grad_norms)) if grad_norms else None
         ep_row = {
             "epoch": ep,
             "time_sec": round(time.time() - start, 2),
@@ -773,6 +780,7 @@ def train_and_eval(
             "lr_encoder": float(opt.param_groups[0]["lr"]),
             "lr_head": float(opt.param_groups[1]["lr"]) if len(opt.param_groups) > 1 else None,
             "gate_mean": gate_mean,
+            "grad_norm": grad_norm_mean,
         }
         logs.append(ep_row)
         if progress_path:
