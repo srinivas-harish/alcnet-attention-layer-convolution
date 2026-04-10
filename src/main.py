@@ -119,14 +119,17 @@ def collate(batch):
 
 # ---------------- Encoder and attention utilities ----------------
 class EncoderWrapper(nn.Module):
-    def __init__(self, model_name: str, gradient_checkpointing: bool = False):
+    def __init__(self, model_name: str, gradient_checkpointing: bool = False, hidden_dropout: float | None = None):
         super().__init__()
-        self.encoder = AutoModel.from_pretrained(
-            model_name,
-            output_attentions=True,
-            output_hidden_states=True,
-            attn_implementation="eager",
-        )
+        kwargs: dict[str, Any] = {
+            "output_attentions": True,
+            "output_hidden_states": True,
+            "attn_implementation": "eager",
+        }
+        if hidden_dropout is not None:
+            kwargs["hidden_dropout_prob"] = hidden_dropout
+            kwargs["attention_probs_dropout_prob"] = hidden_dropout
+        self.encoder = AutoModel.from_pretrained(model_name, **kwargs)
         if gradient_checkpointing and hasattr(self.encoder, "gradient_checkpointing_enable"):
             with contextlib.suppress(Exception):
                 self.encoder.gradient_checkpointing_enable()
@@ -502,6 +505,7 @@ class AlcnetCfg:
     compile_model: bool = False  # torch.compile() — requires PyTorch 2.0+
     ema_decay: float = 0.0  # EMA of model weights; >0 enables (e.g. 0.999)
     ablation: str | None = None  # "no_cnn" | "no_stats" | "no_film" | None
+    hidden_dropout: float | None = None  # override encoder hidden/attention dropout
 
 
 def parse_layers(sel: tuple[int, ...], n_layers: int) -> list[int]:
@@ -597,7 +601,7 @@ def train_and_eval(
     device = device or pick_device(cfg.device)
 
     _tok, train_dl, val_dl = build_loaders(cfg, device)
-    encoder = EncoderWrapper(cfg.model_name, cfg.gradient_checkpointing).to(device)
+    encoder = EncoderWrapper(cfg.model_name, cfg.gradient_checkpointing, hidden_dropout=cfg.hidden_dropout).to(device)
 
     # Probe shapes for model init
     with torch.no_grad():
