@@ -1,4 +1,4 @@
-# ALCNet — Attention-Layer Convolution Network
+# ALCNet - Attention-Layer Convolution Network
 
 Research platform for studying whether the 2D spatial geometry of transformer attention maps contains discriminative signal complementary to the CLS representation. Evaluated on GLUE RTE (binary textual entailment; 2,490 train / 277 validation examples).
 
@@ -8,24 +8,23 @@ Research platform for studying whether the 2D spatial geometry of transformer at
 
 1. [Motivation](#motivation)
 2. [Architecture](#architecture)
-3. [Mathematical Formulation](#mathematical-formulation)
-4. [Results and Ablations](#results-and-ablations)
-5. [Installation](#installation)
-6. [Training: CLI](#training-cli)
-7. [Training: API + Worker](#training-api--worker)
-8. [API Reference](#api-reference)
-9. [Config Knobs](#config-knobs)
-10. [Tests](#tests)
-11. [Visualizations](#visualizations)
-12. [Limitations and Open Problems](#limitations-and-open-problems)
-13. [Roadmap](#roadmap)
-14. [Appendix: Mathematical Formulation Details](#appendix-mathematical-formulation-details)
+3. [Results and Ablations](#results-and-ablations)
+4. [Visualizations](#visualizations)
+5. [Limitations and Open Problems](#limitations-and-open-problems)
+6. [Installation](#installation)
+7. [Training: CLI](#training-cli)
+8. [Training: API + Worker](#training-api--worker)
+9. [API Reference](#api-reference)
+10. [Config Knobs](#config-knobs)
+11. [Tests](#tests)
+12. [Roadmap](#roadmap)
+13. [Appendix: Mathematical Formulation Details](#appendix-mathematical-formulation-details)
 
 ---
 
 ## Motivation
 
-In standard classification fine-tuning, the full $(B, H, S, S)$ attention tensor is discarded and only the CLS representation is routed to the classifier head. The question this project asks: *does the 2D spatial structure of attention — which heads attend locally vs. globally, how asymmetric cross-token attention is, how concentrated the head distributions are — contain discriminative signal that is not already captured by the CLS vector?*
+In standard classification fine-tuning, the full $(B, H, S, S)$ attention tensor is discarded and only the CLS representation is routed to the classifier head. The question this project asks: *does the 2D spatial structure of attention - which heads attend locally vs. globally, how asymmetric cross-token attention is, how concentrated the head distributions are - contain discriminative signal that is not already captured by the CLS vector?*
 
 This is a hypothesis being tested, not a claim established by results. The architecture is designed to allow a controlled study of that question by building a parallel CNN branch over attention maps and measuring whether it contributes signal the CLS head cannot provide.
 
@@ -69,7 +68,7 @@ EncoderWrapper  [RoBERTa-large, output_attentions=True]
 - Optional gradient checkpointing (`gradient_checkpointing=True` by default).
 
 **AttnCNN**
-- 1×1 channel adapter: $(B, C_{in}, S, S) \to (B, 64, S, S)$, where $C_{in} = n\_heads \times |\text{attn\_layers}|$.
+- 1×1 channel adapter: $(B, C_\text{in}, S, S) \to (B, 64, S, S)$. $C_\text{in} = n_h \times L$ where $n_h = 16$ heads and $L$ is the number of selected layers; default $(B, 48, 128, 128)$.
 - Stage 1: ConvBlock(64→128, 3×3) + SEBlock(128) + DropPath + residual shortcut.
   Full ConvBlock sequence: Conv2d → BatchNorm2d → FiLM(γ₁, β₁) → GELU → Dropout2d.
 - Stage 2: MaxPool2d(2) → ConvBlock(128→256, 3×3) + SEBlock(256) + DropPath + residual shortcut.
@@ -78,42 +77,42 @@ EncoderWrapper  [RoBERTa-large, output_attentions=True]
 - FC: Linear(256, 256).
 - ConvBlock supports optional depthwise-separable mode (`depthwise_sep=True`).
 
-**SEBlock** — squeeze-and-excitation channel recalibration: global average pool → Linear(C, C//4) → GELU → Linear(C//4, C) → Sigmoid → channel-wise scale.
+**SEBlock** - squeeze-and-excitation channel recalibration: global average pool → Linear(C, C//4) → GELU → Linear(C//4, C) → Sigmoid → channel-wise scale.
 
-**DropPath** — stochastic depth on residual branches; per-sample Bernoulli mask during training.
+**DropPath** - stochastic depth on residual branches; per-sample Bernoulli mask during training.
 
-**FiLMGenerator** — maps the stats vector to per-channel $(\gamma, \beta)$ for each CNN stage:
-- Stage 1: Linear(stats\_dim, 128×2) → $(\gamma_1, \beta_1) \in \mathbb{R}^{128}$ each.
-- Stage 2: Linear(stats\_dim, 256×2) → $(\gamma_2, \beta_2) \in \mathbb{R}^{256}$ each.
+**FiLMGenerator** - maps the stats vector to per-channel $(\gamma, \beta)$ for each CNN stage:
+- Stage 1: Linear(`stats_dim`, 128×2) → $(\gamma_1, \beta_1) \in \mathbb{R}^{128}$ each.
+- Stage 2: Linear(`stats_dim`, 256×2) → $(\gamma_2, \beta_2) \in \mathbb{R}^{256}$ each.
 - Bias initialized so $\gamma \approx 1$, $\beta \approx 0$ (identity at init).
 
-**MLP (stats branch)** — LayerNorm(stats\_dim) → Linear(stats\_dim, max(128, stats\_dim//2)) → GELU → Dropout(0.1) → Linear → 128-d. With default stats\_dim=21: hidden size = 128.
+**MLP (stats branch)** - LayerNorm(`stats_dim`) → Linear(`stats_dim`, max(128, `stats_dim`//2)) → GELU → Dropout(0.1) → Linear → 128-d. With default `stats_dim=21`: hidden size = 128.
 
-**Confidence gate** — Linear(384, 1) with bias initialized to −2.0 (gate ≈ 0.12 at init, CLS-dominant). Sigmoid output logged per epoch.
+**Confidence gate** - Linear(384, 1) with bias initialized to -2.0 (gate ≈ 0.12 at init, CLS-dominant). Sigmoid output logged per epoch.
 
-**ModelEMA** — exponential moving average over all named parameters, applied during validation when `ema_decay > 0`. Context-manager-based weight swap.
+**ModelEMA** - exponential moving average over all named parameters, applied during validation when `ema_decay > 0`. Context-manager-based weight swap.
 
 ### Attention Statistics (attn\_stats)
 
-Runs under `@torch.no_grad()` — statistical features receive no gradient signal. Input: attention tensors from selected layers, each $(B, H, S, S)$; RoBERTa-large softmax outputs where each row already sums to 1. Output: $(B, \text{stats\_dim})$.
+Runs under `@torch.no_grad()` - statistical features receive no gradient signal. Input: attention tensors from selected layers, each $(B, H, S, S)$; RoBERTa-large softmax outputs where each row already sums to 1. Output: $(B, \text{stats\_dim})$.
 
 **Per selected layer** $\ell$ (6 features × L layers; default L=3, indices −3,−2,−1):
 
 | Index | Feature | Definition |
 |---|---|---|
 | 0 | Long-range ratio | $\text{mean}_h \left[\frac{\sum_{i,j: \|i-j\|\geq 5} A_{h,ij}}{\sum_{ij} A_{h,ij}}\right]$ |
-| 1 | CLS-in attention | $\text{mean}_{h,i} \, A_{h,i,0}$ — mean attention directed at token 0 (CLS) |
-| 2 | Entropy mean | $\text{mean}_{h,i} \left[-\sum_j A_{h,ij} \log A_{h,ij}\right]$ — per-row entropy, averaged over heads and query positions. Note: $A_{h,ij}$ are already row-softmaxed. |
-| 3 | Entropy std | $\text{std}_h \left[\text{mean}_i \left(-\sum_j A_{h,ij} \log A_{h,ij}\right)\right]$ — std of per-head mean entropy across H heads |
-| 4 | Max-row attention | $\text{mean}_{h,i} \left[\max_j A_{h,ij}\right]$ — mean per-row peak (no additional normalization; rows already sum to 1) |
-| 5 | Asymmetry | $\text{mean}_h \left[\|A_h - A_h^T\|_1\right]$ — mean absolute element-wise asymmetry across heads (unnormalized; sequence length is constant per batch) |
+| 1 | CLS-in attention | $\text{mean}_{h,i} \, A_{h,i,0}$ - mean attention directed at token 0 (CLS) |
+| 2 | Entropy mean | $\text{mean}_{h,i} \left[-\sum_j A_{h,ij} \log A_{h,ij}\right]$ - per-row entropy, averaged over heads and query positions. Note: $A_{h,ij}$ are already row-softmaxed. |
+| 3 | Entropy std | $\text{std}_h \left[\text{mean}_i \left(-\sum_j A_{h,ij} \log A_{h,ij}\right)\right]$ - std of per-head mean entropy across H heads |
+| 4 | Max-row attention | $\text{mean}_{h,i} \left[\max_j A_{h,ij}\right]$ - mean per-row peak (no additional normalization; rows already sum to 1) |
+| 5 | Asymmetry | $\text{mean}_h \left[\|A_h - A_h^T\|_1\right]$ - mean absolute element-wise asymmetry across heads (unnormalized; sequence length is constant per batch) |
 
 **Global features** from the last selected layer (the final element of the sorted index list; default: layer −1):
 
 | Index | Feature | Definition |
 |---|---|---|
-| 6L | Diagonal mass | $\frac{\sum_{i} A_{ii}}{\sum_{ij} A_{ij}}$ — self-attention fraction |
-| 6L+1 | Off-diagonal mass | $1 - \text{diag\_mass}$ |
+| 6L | Diagonal mass | $\frac{\sum_{i} A_{ii}}{\sum_{ij} A_{ij}}$ - self-attention fraction |
+| 6L+1 | Off-diagonal mass | 1 minus diagonal mass |
 | 6L+2 | Effective head count | Fraction of heads where per-head off-diagonal mass $> 0.60$ |
 
 With default `attn_layers = (-3, -2, -1)`, `stats_dim = 6×3 + 3 = 21`.
@@ -124,7 +123,7 @@ With default `attn_layers = (-3, -2, -1)`, `stats_dim = 6×3 + 3 = 21`.
 
 > **GLUE RTE validation** (277 examples, 2-class; 2,490 train examples).
 >
-> **Majority-class baseline**: the RTE training split is ~66% entailment, giving a majority-class classifier approximately 53–54% on the validation set. The current full-model result (52.71%) is **at or below this level** — the model has not yet learned task-relevant structure in this configuration.
+> **Majority-class baseline**: the RTE training split is ~66% entailment, giving a majority-class classifier approximately 53–54% on the validation set. The current full-model result (52.71%) is **at or below this level** - the model has not yet learned task-relevant structure in this configuration.
 >
 > **RoBERTa-large standard fine-tuning**: ~86–88% (Liu et al., 2019). This comparison is not controlled: Liu et al. fine-tune end-to-end with standard CE loss; the results below use a different training regime (hybrid loss, partially-frozen encoder). The 34-point gap cannot be attributed to architecture alone.
 
@@ -138,8 +137,8 @@ Obtained with default `AlcnetCfg`: epochs=3, batch\_size=8, max\_len=128, lr\_en
 |---|---|---|
 | Full model (CLS + CNN + Stats + FiLM) | 52.71% | At or below majority-class baseline |
 | `no_cnn` (CLS branch only) | 47.29% | −5.42 pts; below majority-class |
-| `no_stats` (FiLM still active, stats MLP zeroed) | — | Not yet run |
-| `no_film` (CNN without FiLM conditioning) | — | Not yet run |
+| `no_stats` (FiLM still active, stats MLP zeroed) | - | Not yet run |
+| `no_film` (CNN without FiLM conditioning) | - | Not yet run |
 
 The `no_stats` and `no_film` ablations have not been run; these conditions directly test the two novel components. The +5.42 pt delta for the full model over `no_cnn` is not statistically significant at n=277 (SE ≈ 3 pts). Both results are below the majority-class baseline. **Missing baseline**: mean-pooling of the final encoder layer has not been tested; it consistently outperforms CLS-only on small datasets and would be a more informative lower bound.
 
@@ -157,7 +156,7 @@ Features from the best checkpoint (same run as the 52.71% result); probed with `
 | CLS + Stats | 52.35% |
 | CNN + CLS + Stats | 54.51% |
 
-Stats-only probing (55.60%) outperforms the full end-to-end model (52.71%), which is not expected — it suggests the training loop is not exploiting the available feature information. The CNN+Stats linear probe delta over Stats-only is +1.44 pts, within the SE of ~3 pts at this sample size. CNN+CLS (53.43%) barely exceeds CNN-only (52.71%), suggesting the CLS and CNN features are not strongly complementary in this checkpoint. All margins are below statistical significance at n=277.
+Stats-only probing (55.60%) outperforms the full end-to-end model (52.71%), which is not expected - it suggests the training loop is not exploiting the available feature information. The CNN+Stats linear probe delta over Stats-only is +1.44 pts, within the SE of ~3 pts at this sample size. CNN+CLS (53.43%) barely exceeds CNN-only (52.71%), suggesting the CLS and CNN features are not strongly complementary in this checkpoint. All margins are below statistical significance at n=277.
 
 ### CNN feature variance
 
@@ -165,7 +164,7 @@ Stats-only probing (55.60%) outperforms the full end-to-end model (52.71%), whic
 |---|---|
 | Mean variance across 256 CNN dims | 0.000503 |
 
-Near-zero CNN feature variance indicates the branch produces near-constant outputs across inputs — consistent with representational collapse rather than discriminative CNN features. The linear probe result for CNN+Stats reflecting primarily the Stats contribution (rather than the CNN) is consistent with this.
+Near-zero CNN feature variance indicates the branch produces near-constant outputs across inputs - consistent with representational collapse rather than discriminative CNN features. The linear probe result for CNN+Stats reflecting primarily the Stats contribution (rather than the CNN) is consistent with this.
 
 ---
 
@@ -225,9 +224,9 @@ Per-epoch metrics are written as JSON lines to `--progress-file`. Final report s
 ### Ablation modes
 
 Add `"ablation"` key to the JSON payload:
-- `"no_cnn"` — CLS branch only; no CNN or stats
-- `"no_film"` — CNN without FiLM conditioning from stats
-- `"no_stats"` — zeros the stats MLP output going to the classification head; FiLM conditioning from the stats vector remains active in the CNN
+- `"no_cnn"` - CLS branch only; no CNN or stats
+- `"no_film"` - CNN without FiLM conditioning from stats
+- `"no_stats"` - zeros the stats MLP output going to the classification head; FiLM conditioning from the stats vector remains active in the CNN
 
 ---
 
@@ -276,7 +275,7 @@ curl http://localhost:8000/runs/<run_id>
 | GET | `/runs` | List runs. Query: `limit` (default 50), `status` |
 | GET | `/runs/{run_id}` | Full run record: config, epoch logs, artifacts, result |
 
-### POST /runs — request schema
+### POST /runs - request schema
 
 ```json
 {
@@ -294,7 +293,7 @@ curl http://localhost:8000/runs/<run_id>
 
 `overrides`: keys matching `AlcnetCfg` fields are applied; unknown keys are silently ignored with a warning log.
 
-### GET /runs/{run_id} — response shape
+### GET /runs/{run_id} - response shape
 
 ```json
 {
@@ -321,7 +320,7 @@ curl http://localhost:8000/runs/<run_id>
 }
 ```
 
-Note: `lr` in `epochs_log` is always `null` — the training loop emits `lr_encoder`/`lr_head` separately, captured under `gates` rather than the dedicated `lr` column. Known schema mismatch; see Roadmap.
+Note: `lr` in `epochs_log` is always `null` - the training loop emits `lr_encoder`/`lr_head` separately, captured under `gates` rather than the dedicated `lr` column. Known schema mismatch; see Roadmap.
 
 ---
 
@@ -346,7 +345,7 @@ Note: `lr` in `epochs_log` is always `null` — the training loop emits `lr_enco
 | `attn_drop` | 0.0 | Random element dropout on attention maps during training |
 | `warmup_ratio` | 0.06 | Fraction of total steps for linear LR warmup |
 | `lr_schedule` | `"cosine"` | `"cosine"` or `"cosine_restarts"` (per-epoch restart) |
-| `early_stopping_patience` | 0 | Stop after N epochs without val\_acc improvement; 0 = off |
+| `early_stopping_patience` | 0 | Stop after N epochs without val_acc improvement; 0 = off |
 | `gradient_checkpointing` | True | Trade compute for memory in encoder |
 | `compile_model` | False | `torch.compile()` the GatedHybridClassifier (not the encoder; PyTorch 2.0+) |
 | `ema_decay` | 0.0 | EMA decay; 0 = off; 0.999 typical if enabled |
@@ -415,7 +414,7 @@ pytest --cov=src --cov-report=term-missing
   <img src="docs/masked_cnn.png" alt="CNN heatmap under selective attention masking" width="500"/>
 </p>
 
-**Figure 2**: CNN activation map under inference-time selective masking — only the top-left patch of the attention tensor is unmasked. Discriminative signal concentrates in the visible region. This demonstrates input sensitivity of the CNN output; it does not demonstrate training-time gradient flow into the encoder's Q/K/V projections.
+**Figure 2**: CNN activation map under inference-time selective masking, with only the top-left patch of the attention tensor unmasked. Discriminative signal concentrates in the visible region. This demonstrates input sensitivity of the CNN output; it does not demonstrate training-time gradient flow into the encoder's Q/K/V projections.
 
 ---
 
@@ -425,7 +424,7 @@ pytest --cov=src --cov-report=term-missing
 
 - **`attn_stats` runs under `@torch.no_grad()`**: Statistical features receive no gradient from the classification loss. This prevents the stats MLP from adapting toward discriminative structure. Intentional (for efficiency and stability), but it limits what the stats branch can learn.
 - **Gate initialized CNN-skeptical** (`bias = -2.0`, $g \approx 0.12$): The CNN branch must produce useful signal before the gate opens, but will not receive meaningful gradient if the gate is always near zero. Convergence gate value has not been measured in reported runs.
-- **`no_stats` ablation leaves FiLM active**: Zeroing the stats MLP output does not disable FiLM conditioning in the CNN — the stats vector still modulates CNN feature maps. The `no_stats` condition tests "stats contribution to the classification head" not "stats contribution overall."
+- **`no_stats` ablation leaves FiLM active**: Zeroing the stats MLP output does not disable FiLM conditioning in the CNN - the stats vector still modulates CNN feature maps. The `no_stats` condition tests "stats contribution to the classification head" not "stats contribution overall."
 
 ### Empirical failure modes
 
@@ -436,7 +435,7 @@ pytest --cov=src --cov-report=term-missing
 
 ### What would falsify the hypothesis
 
-The central hypothesis — that attention geometry provides signal complementary to CLS — would be falsified if: (a) `no_cnn` and full model converge to the same accuracy under matched hyperparameters with a well-trained encoder, and (b) linear probing of CNN features after full encoder fine-tuning shows no accuracy gain over CLS or mean-pool. Neither condition has yet been tested.
+The central hypothesis - that attention geometry provides signal complementary to CLS - would be falsified if: (a) `no_cnn` and full model converge to the same accuracy under matched hyperparameters with a well-trained encoder, and (b) linear probing of CNN features after full encoder fine-tuning shows no accuracy gain over CLS or mean-pool. Neither condition has yet been tested.
 
 ### Research questions this platform enables
 
@@ -450,18 +449,24 @@ The central hypothesis — that attention geometry provides signal complementary
 
 ## Roadmap
 
-Priority ordered by proximity to validating the core hypothesis:
+**Experiments**
 
-- [ ] Run missing ablations: `no_stats`, `no_film`, mean-pool baseline
-- [ ] Measure convergence gate value — establish whether the CNN branch is ever weighted above 0.5
-- [ ] Full encoder fine-tuning run: epochs=10, unfreeze from epoch 1, higher `lr_encoder`
-- [ ] Fix DB schema: persist `lr_encoder`, `lr_head`, `gate_mean`, `grad_norm` as dedicated columns
-- [ ] Address CNN feature collapse: auxiliary CNN loss, higher `lr_head`, or deeper CNN
-- [ ] Inference script: load checkpoint, predict single (premise, hypothesis) pair, return label + gate
-- [ ] Optional in-graph `attn_stats` (flag to remove `@torch.no_grad()`, measure gradient stability)
-- [ ] Extend to MNLI, QNLI — test whether attention geometry is more discriminative on other tasks
-- [ ] `torch.compile()` validation (`compile_model=False` default; GatedHybridClassifier only, encoder excluded)
-- [ ] W&B / MLflow integration for hyperparameter sweep tracking
+- Complete the branch ablation suite: `no_stats`, `no_film`, and mean-pool encoder baseline
+- Systematic sweep of `attn_layers` to identify which layer combinations yield the most informative attention geometry for entailment
+- Encoder fine-tuning study: vary `lr_encoder` and `freeze_encoder_epochs` to characterize the relationship between encoder adaptation and CNN branch utility
+- Multi-task evaluation: extend to MNLI, QNLI, and SST-2 to test whether attention geometry is more discriminative on other NLU task types
+- Gradient-in-graph statistics: optional mode to remove the `@torch.no_grad()` guard on `attn_stats` and measure the effect on training dynamics
+
+**Features**
+
+- Inference script: given a trained checkpoint, predict a single (premise, hypothesis) pair and return the predicted label along with the confidence gate value
+- W&B and MLflow integration for experiment tracking across hyperparameter sweeps
+- Multi-GPU training via DistributedDataParallel
+
+**Infrastructure**
+
+- Extended `torch.compile()` support covering the full forward pass
+- Expanded GLUE task support beyond RTE
 
 ---
 
@@ -477,7 +482,7 @@ Channel-normalize: $X \leftarrow (X - \mu_c) / (\sigma_c + \epsilon)$, statistic
 
 ### FiLM conditioning
 
-Statistical features $s \in \mathbb{R}^{\text{stats\_dim}}$ generate per-channel scale and shift. Applied within ConvBlock after BN, before activation (Conv → BN → FiLM → GELU → Dropout):
+Statistical features $s \in \mathbb{R}^{d_s}$ (where $d_s$ = `stats_dim`, default 21) generate per-channel scale and shift. Applied within ConvBlock after BN, before activation (Conv → BN → FiLM → GELU → Dropout):
 
 $$(\gamma^{(k)}, \beta^{(k)}) = W^{(k)} s + b^{(k)}, \quad k \in \{1, 2\}$$
 
